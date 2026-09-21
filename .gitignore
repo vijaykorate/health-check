@@ -24,6 +24,15 @@
 .DS_Store
 *.pem
 
+# runtime logs
+*.log
+
+# runtime data (session store + auth sessions) — not source, recreated at runtime
+/data/*
+!/data/sessions/
+/data/sessions/*
+!/data/sessions/.gitkeep
+
 # debug
 npm-debug.log*
 yarn-debug.log*
