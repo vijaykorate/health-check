@@ -222,9 +222,11 @@ export function getAuthSession(token: string | undefined): AuthSession | null {
   return { token, ...payload };
 }
 
-export function endAuthSession(_token: string | undefined): void {
+export function endAuthSession(token: string | undefined): void {
   // Stateless sessions carry no server-side state; clearing the cookie
-  // (done by the logout route) is a complete sign-out.
+  // (done by the logout route) is a complete sign-out. The token is accepted
+  // for API compatibility with the previous stateful implementation.
+  void token;
 }
 
 export const AUTH_COOKIE = "hc_session";
