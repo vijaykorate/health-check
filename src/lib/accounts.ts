@@ -10,8 +10,7 @@
 //   - listOrders()  -> order_master query by technician/territory
 //   - users/orders  -> real identity + job-card sources
 
-import fs from "node:fs";
-import path from "node:path";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 export type Role = "technician" | "admin";
 
@@ -97,34 +96,15 @@ export interface AuthSession {
   expiresAt: number;
 }
 
-const DATA_DIR = path.join(process.cwd(), "data");
-const SESS_FILE = path.join(DATA_DIR, "auth-sessions.json");
-
+// NOTE: OTPs are still kept in an in-memory Map. That's fine for the demo login
+// (which uses the fixed DUMMY_OTP and never reads this Map), but the *consent*
+// flow issues real random codes and will hit the same cross-instance problem on
+// serverless — move that store to Vercel KV / Redis before relying on it in prod.
 const g = globalThis as unknown as {
   __hcOtps?: Map<string, OtpEntry>;
-  __hcAuth?: Map<string, AuthSession>;
 };
 
 const otps: Map<string, OtpEntry> = g.__hcOtps ?? (g.__hcOtps = new Map());
-
-function loadSessions(): Map<string, AuthSession> {
-  try {
-    const raw = fs.readFileSync(SESS_FILE, "utf8");
-    return new Map(Object.entries(JSON.parse(raw) as Record<string, AuthSession>));
-  } catch {
-    return new Map();
-  }
-}
-const authSessions: Map<string, AuthSession> = g.__hcAuth ?? (g.__hcAuth = loadSessions());
-
-function persistSessions(): void {
-  try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(SESS_FILE, JSON.stringify(Object.fromEntries(authSessions)), "utf8");
-  } catch (err) {
-    console.error("[accounts] persist sessions failed:", err);
-  }
-}
 
 const OTP_TTL_MS = 10 * 60 * 1000;
 const SHIFT_TTL_MS = 8 * 60 * 60 * 1000; // a shift
@@ -182,37 +162,69 @@ export function verifyOtp(purpose: OtpPurpose, channel: string, code: string): b
 
 // ── Auth sessions ───────────────────────────────────────────────────────────
 
-/** Short-lived token, stored server-side; the value goes in an httpOnly cookie
- *  (never a URL). */
+// Stateless, signed session cookie: the token carries the session payload plus
+// an HMAC signature, so any serverless instance can verify it without a shared
+// store. Set AUTH_SECRET in the environment (Vercel Project Settings) — the dev
+// fallback is intentionally insecure and must not be relied on in production.
+const AUTH_SECRET =
+  process.env.AUTH_SECRET ??
+  process.env.NEXTAUTH_SECRET ??
+  "dev-insecure-secret-change-me";
+
+interface SessionPayload {
+  userId: string;
+  role: Role;
+  createdAt: number;
+  expiresAt: number;
+}
+
+function sign(data: string): string {
+  return createHmac("sha256", AUTH_SECRET).update(data).digest("base64url");
+}
+
+/** Mint a short-lived, self-contained token; the value goes in an httpOnly
+ *  cookie (never a URL). Requires no server-side storage. */
 export function createAuthSession(userId: string, role: Role): AuthSession {
-  const token = crypto.randomUUID();
   const now = Date.now();
-  const session: AuthSession = {
-    token,
+  const payload: SessionPayload = {
     userId,
     role,
     createdAt: now,
     expiresAt: now + SHIFT_TTL_MS,
   };
-  authSessions.set(token, session);
-  persistSessions();
-  return session;
+  const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const token = `${encoded}.${sign(encoded)}`;
+  return { token, ...payload };
 }
 
 export function getAuthSession(token: string | undefined): AuthSession | null {
   if (!token) return null;
-  const s = authSessions.get(token);
-  if (!s) return null;
-  if (Date.now() > s.expiresAt) {
-    authSessions.delete(token);
-    persistSessions();
+  const dot = token.lastIndexOf(".");
+  if (dot < 0) return null;
+  const encoded = token.slice(0, dot);
+  const signature = token.slice(dot + 1);
+
+  // Constant-time signature check (reject tampered/forged tokens).
+  const expected = sign(encoded);
+  const sigBuf = Buffer.from(signature);
+  const expBuf = Buffer.from(expected);
+  if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) {
     return null;
   }
-  return s;
+
+  let payload: SessionPayload;
+  try {
+    payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+  if (Date.now() > payload.expiresAt) return null;
+  return { token, ...payload };
 }
 
-export function endAuthSession(token: string | undefined): void {
-  if (token && authSessions.delete(token)) persistSessions();
+export function endAuthSession(_token: string | undefined): void {
+  // Stateless sessions carry no server-side state; clearing the cookie
+  // (done by the logout route) is a complete sign-out.
 }
 
 export const AUTH_COOKIE = "hc_session";
