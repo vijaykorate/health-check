@@ -33,6 +33,8 @@ interface BackendDetail {
   scan_error: string | null;
   customerConnectionStatus?: string | null;
   customerOnline?: boolean;
+  consentStatus?: string | null;
+  consentRejectReason?: string | null;
 }
 
 export async function GET(
@@ -97,6 +99,8 @@ export async function GET(
     diagnosticId: d.diagnostic_id ?? null,
     customerConnectionStatus: d.customerConnectionStatus ?? "NOT_CONNECTED",
     customerOnline: !!d.customerOnline,
+    consentStatus: d.consentStatus ?? null,
+    consentRejectReason: d.consentRejectReason ?? null,
   };
   return NextResponse.json(view);
 }

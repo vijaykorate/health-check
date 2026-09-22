@@ -356,6 +356,10 @@ export function VisitWizard({
   const scanDone = view.status === "scanned" || view.status === "completed";
   // Consent = the customer paired into this single backend session.
   const consentAccepted = view.customerConnectionStatus === "CONNECTED";
+  // Admin consent gate (backend-enforced in scriptProgress/scriptComplete/submit);
+  // the UI only reflects it. Diagnostics are shown only once an admin approves.
+  const adminApproved = view.consentStatus === "APPROVED";
+  const consentRejected = view.consentStatus === "REJECTED";
   const scanUnlocked = otpVerified && consentAccepted;
   // Stable callback so OtpGate's status effect doesn't re-run (and re-poll the
   // backend) on every parent re-render (CheckClient re-renders every ~1.5s).
@@ -479,7 +483,38 @@ export function VisitWizard({
             <>
               <PairingPanel id={id} connected={consentAccepted} />
 
-              {consentAccepted ? (
+              {consentAccepted && !adminApproved ? (
+                <div
+                  className={`mt-5 rounded-2xl border p-5 text-sm ${
+                    consentRejected
+                      ? "border-red-300 bg-red-50 text-red-700"
+                      : "border-amber-300 bg-amber-50 text-amber-800"
+                  }`}
+                >
+                  {consentRejected ? (
+                    <>
+                      <p className="font-semibold">Consent rejected by admin</p>
+                      {view.consentRejectReason ? (
+                        <p className="mt-1">Reason: {view.consentRejectReason}</p>
+                      ) : null}
+                      <p className="mt-1">
+                        This Health Check cannot proceed. Reconnect the customer to raise a new
+                        request for approval.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-semibold">Waiting for admin approval</p>
+                      <p className="mt-1">
+                        The customer is connected. An admin must approve this Health Check before the
+                        diagnostic can run.
+                      </p>
+                    </>
+                  )}
+                </div>
+              ) : null}
+
+              {consentAccepted && adminApproved ? (
                 <>
                   <div className="mt-5 inline-flex rounded-xl border border-border bg-surface-2/60 p-1 shadow-inner">
                     {(["windows", "mac"] as const).map((o) => (

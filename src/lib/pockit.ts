@@ -194,7 +194,9 @@ export async function verifyTechnicianOtp(
       TYPE_VALUE: mobile,
       OTP: otp,
       CLOUD_ID: "",
-      DEVICE_TYPE: "M",
+      // Web session bucket ("W"), distinct from the Mobile App's "M"/"D" bucket,
+      // so signing in here does not evict the technician's Mobile App session.
+      DEVICE_TYPE: "W",
       DEVICE_ID: "healthcheck-web",
       DEVICE_NAME: "Health Check Web",
       DEVICE_IP: "",

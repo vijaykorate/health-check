@@ -30,7 +30,7 @@ export function LoginClient() {
         return;
       }
       setStage("code");
-      setHint(`Enter the OTP sent to ${mobile}.`);
+      setHint(`Enter the code sent to your Pockit mobile app for ${mobile}.`);
     } catch {
       setError("Could not send code. Try again.");
     } finally {

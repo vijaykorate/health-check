@@ -201,6 +201,11 @@ export interface SessionView {
    *  One Session): drives the technician's consent gate. */
   customerConnectionStatus?: "NOT_CONNECTED" | "CONNECTED" | string | null;
   customerOnline?: boolean;
+  /** Admin consent decision on the single backend session:
+   *  null (no request yet) | "PENDING" | "APPROVED" | "REJECTED". Diagnostics
+   *  are backend-gated on "APPROVED" (scriptProgress/scriptComplete/postSubmit). */
+  consentStatus?: "PENDING" | "APPROVED" | "REJECTED" | string | null;
+  consentRejectReason?: string | null;
 }
 
 /** Compact row for the dashboard/history list. */
