@@ -23,9 +23,12 @@ export function kvEnabled(): boolean {
 // ── In-memory fallback (dev / no creds) ─────────────────────────────────────
 const g = globalThis as unknown as {
   __hcKv?: Map<string, { value: string; expiresAt: number | null }>;
+  __hcKvSets?: Map<string, Set<string>>;
 };
 const mem: Map<string, { value: string; expiresAt: number | null }> =
   g.__hcKv ?? (g.__hcKv = new Map());
+const memSets: Map<string, Set<string>> =
+  g.__hcKvSets ?? (g.__hcKvSets = new Map());
 
 function memGet(key: string): string | null {
   const e = mem.get(key);
@@ -85,4 +88,25 @@ export async function kvDel(key: string): Promise<void> {
     return;
   }
   await command(["DEL", key]);
+}
+
+/** Add a member to a set (Redis SADD). Used for the session index so the store
+ *  can enumerate all sessions without a SCAN. */
+export async function kvSAdd(key: string, member: string): Promise<void> {
+  if (!kvEnabled()) {
+    const set = memSets.get(key) ?? new Set<string>();
+    set.add(member);
+    memSets.set(key, set);
+    return;
+  }
+  await command(["SADD", key, member]);
+}
+
+/** List all members of a set (Redis SMEMBERS). */
+export async function kvSMembers(key: string): Promise<string[]> {
+  if (!kvEnabled()) {
+    return [...(memSets.get(key) ?? [])];
+  }
+  const result = await command(["SMEMBERS", key]);
+  return Array.isArray(result) ? (result as string[]) : [];
 }

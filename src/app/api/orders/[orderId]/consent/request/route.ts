@@ -17,7 +17,7 @@ export async function POST(
   }
   const { orderId } = await ctx.params;
   // The technician must own the session they're requesting consent for.
-  const session = findLatestByOrder(orderId);
+  const session = await findLatestByOrder(orderId);
   if (!session || session.technicianId !== me.user.id) {
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }

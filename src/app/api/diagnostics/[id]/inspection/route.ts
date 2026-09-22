@@ -14,7 +14,7 @@ export async function POST(
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
-  const result = setInspection(id, body.inspection ?? {}, body.observations?.trim() || null);
+  const result = await setInspection(id, body.inspection ?? {}, body.observations?.trim() || null);
   if (!result.ok) {
     return NextResponse.json({ error: result.reason }, { status: 404 });
   }

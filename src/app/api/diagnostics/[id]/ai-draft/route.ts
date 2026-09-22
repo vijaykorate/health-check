@@ -11,15 +11,15 @@ export async function POST(
   ctx: { params: Promise<{ id: string }> },
 ) {
   const { id } = await ctx.params;
-  const session = getSession(id);
+  const session = await getSession(id);
   if (!session) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
   const category = session.diagnostic?.Complaint?.Category ?? session.category ?? null;
 
-  // (a) own history — synchronous, local, always available.
-  const similarCases = findSimilarCases({
+  // (a) own history — from the shared session store.
+  const similarCases = await findSimilarCases({
     manufacturer: session.manufacturer,
     model: session.model,
     category,

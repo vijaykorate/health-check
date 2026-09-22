@@ -36,7 +36,7 @@ export async function POST(request: Request) {
   const stressTest = body.stressTest === true;
   const mode = body.mode === "manual" ? "manual" : "auto";
 
-  const session = createSession({ complaint, category, stressTest });
+  const session = await createSession({ complaint, category, stressTest });
 
   if (mode === "manual") {
     // Don't spawn — hand back commands the technician pastes into PowerShell.

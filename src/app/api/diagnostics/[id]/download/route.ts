@@ -23,7 +23,7 @@ export async function GET(
   ctx: { params: Promise<{ id: string }> },
 ) {
   const { id } = await ctx.params;
-  const session = getSession(id);
+  const session = await getSession(id);
   if (!session) {
     return new Response("Session not found", { status: 404 });
   }

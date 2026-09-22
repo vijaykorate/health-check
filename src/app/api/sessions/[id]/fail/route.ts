@@ -15,7 +15,7 @@ export async function POST(
     // Tolerate a missing body.
   }
 
-  const result = failSession(id, body.error ?? "Unknown scan error");
+  const result = await failSession(id, body.error ?? "Unknown scan error");
   if (!result.ok) {
     return NextResponse.json(
       { error: result.reason },

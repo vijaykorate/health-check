@@ -27,7 +27,7 @@ export async function POST(request: Request) {
   }
 
   // The session must still exist and be eligible (not cancelled).
-  const session = findLatestByOrder(orderId);
+  const session = await findLatestByOrder(orderId);
   if (!session) {
     return NextResponse.json({ error: "no_health_check" }, { status: 404 });
   }

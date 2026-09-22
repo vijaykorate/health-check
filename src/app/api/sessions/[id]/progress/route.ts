@@ -16,7 +16,7 @@ export async function POST(
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const result = updateProgress(id, payload);
+  const result = await updateProgress(id, payload);
   if (!result.ok) {
     return NextResponse.json(
       { error: result.reason },

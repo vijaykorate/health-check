@@ -9,13 +9,13 @@ export async function POST(
   ctx: { params: Promise<{ id: string }> },
 ) {
   const { id } = await ctx.params;
-  const result = markDelivered(id);
+  const result = await markDelivered(id);
   if (!result.ok) {
     return NextResponse.json({ error: result.reason }, { status: 404 });
   }
   // Release the report to the shared store so the customer's phone (a separate
   // device / serverless instance) can read it.
-  const session = getSession(id);
+  const session = await getSession(id);
   if (session?.orderId && session.diagnostic) {
     await publishReport(session.orderId, session.diagnostic);
   }

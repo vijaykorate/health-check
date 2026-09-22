@@ -38,22 +38,24 @@ export async function GET() {
     }));
   }
 
-  const orders = baseOrders.map((o) => {
-    const session = findLatestByOrder(o.orderId);
-    let state: "open" | "in_progress" | "completed" | "failed" = "open";
-    if (session) {
-      if (session.status === "running") state = "in_progress";
-      else if (session.status === "scanned" || session.status === "completed")
-        state = "completed";
-      else if (session.status === "failed") state = "open"; // can retry
-    }
-    return {
-      ...o,
-      state,
-      sessionId: session?.id ?? null,
-      healthScore: session?.healthScore ?? null,
-    };
-  });
+  const orders = await Promise.all(
+    baseOrders.map(async (o) => {
+      const session = await findLatestByOrder(o.orderId);
+      let state: "open" | "in_progress" | "completed" | "failed" = "open";
+      if (session) {
+        if (session.status === "running") state = "in_progress";
+        else if (session.status === "scanned" || session.status === "completed")
+          state = "completed";
+        else if (session.status === "failed") state = "open"; // can retry
+      }
+      return {
+        ...o,
+        state,
+        sessionId: session?.id ?? null,
+        healthScore: session?.healthScore ?? null,
+      };
+    }),
+  );
 
   return NextResponse.json({ orders });
 }

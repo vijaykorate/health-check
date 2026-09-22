@@ -28,7 +28,7 @@ export async function POST(
       ? (body.severity as Severity)
       : null;
 
-  const result = setFindings(id, {
+  const result = await setFindings(id, {
     primaryFinding: body.primaryFinding?.trim() || null,
     severity,
     diagnosis: body.diagnosis?.trim() || null,

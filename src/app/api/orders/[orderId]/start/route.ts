@@ -19,7 +19,7 @@ export async function POST(
   const { orderId } = await ctx.params;
 
   // Reuse an existing session for this order (unless it was cancelled/failed).
-  const existing = findLatestByOrder(orderId);
+  const existing = await findLatestByOrder(orderId);
   if (existing && existing.status !== "failed") {
     return NextResponse.json({ url: `/check/${existing.id}` });
   }
@@ -54,7 +54,7 @@ export async function POST(
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
-  const session = createSession({
+  const session = await createSession({
     complaint: context.complaint,
     category: "",
     stressTest: false,

@@ -10,7 +10,7 @@ export async function POST(
   const { id } = await ctx.params;
 
   // Mark failed first (only valid while running); then stop the real process.
-  const result = cancelSession(id);
+  const result = await cancelSession(id);
   if (!result.ok) {
     return NextResponse.json(
       { error: result.reason },

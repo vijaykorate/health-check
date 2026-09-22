@@ -17,7 +17,7 @@ export async function GET(
 
   // Order metadata comes from the technician-created session (the source of
   // truth for a real Pockit order).
-  const session = findLatestByOrder(orderId);
+  const session = await findLatestByOrder(orderId);
   if (!session) {
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }

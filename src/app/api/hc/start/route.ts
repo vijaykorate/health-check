@@ -57,7 +57,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const session = createSession({
+  const session = await createSession({
     complaint: (body.problem ?? "").toString().trim(),
     category: "",
     stressTest: false,

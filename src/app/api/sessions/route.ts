@@ -4,5 +4,5 @@ import { NextResponse } from "next/server";
 import { listSummaries } from "@/lib/store";
 
 export async function GET() {
-  return NextResponse.json({ sessions: listSummaries() });
+  return NextResponse.json({ sessions: await listSummaries() });
 }

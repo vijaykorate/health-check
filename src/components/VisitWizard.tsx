@@ -293,6 +293,11 @@ export function VisitWizard({
   const [os, setOs] = useState<"windows" | "mac">("windows");
   // The scan commands are revealed only once the customer approves consent.
   const [consentAccepted, setConsentAccepted] = useState(false);
+  // Primary "Run Health Check" action state.
+  const [starting, setStarting] = useState(false);
+  const [triggered, setTriggered] = useState(false);
+  const [manualRequired, setManualRequired] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
 
   // Inspection state
   const [inspection, setInspection] = useState<Record<string, InspectionStatus>>({});
@@ -315,7 +320,7 @@ export function VisitWizard({
   // Scan commands unlock once the customer approves (self-checks have no order).
   const scanUnlocked = !view.orderId || consentAccepted;
 
-  // Fetch the launch commands for this session.
+  // Fetch the launch commands for this session (used by the Advanced fallback).
   useEffect(() => {
     if (stage !== "launch" || launch) return;
     fetch(`/api/diagnostics/${id}/launch`)
@@ -323,6 +328,36 @@ export function VisitWizard({
       .then((d) => setLaunch(d as LaunchInfo))
       .catch(() => {});
   }, [stage, launch, id]);
+
+  // Primary action: run the health check through the existing engine mechanism
+  // (same launcher as /self-check). When the host can't launch it directly
+  // (serverless), reveal the "run on the machine being checked" fallback.
+  async function runHealthCheck() {
+    if (starting || triggered) return;
+    setStarting(true);
+    setRunError(null);
+    try {
+      const res = await fetch(`/api/diagnostics/${id}/run`, { method: "POST" });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        reason?: string;
+      };
+      if (data.ok) {
+        setTriggered(true);
+      } else if (data.reason === "manual_required") {
+        // This host can't spawn the engine (e.g. Vercel) — the scan runs on the
+        // machine being checked via the command/download below.
+        setManualRequired(true);
+      } else {
+        setRunError("Couldn't start the health check. Use the option below.");
+        setManualRequired(true);
+      }
+    } catch {
+      setRunError("Couldn't reach the server. Try again.");
+    } finally {
+      setStarting(false);
+    }
+  }
 
   // Advance launch → scanning → inspection off the live scan status. The scan
   // starts only once the technician runs the command, so we detect real
@@ -433,8 +468,8 @@ export function VisitWizard({
             Run the health check on this machine
           </h2>
           <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted">
-            Paste the command into an open terminal, or download and run the file. Nothing is
-            saved on the machine — results stream straight back here.
+            Once the customer approves, run the health check on the machine being serviced.
+            Nothing is saved on the machine — results stream straight back here.
           </p>
 
           {view.orderId ? (
@@ -445,7 +480,40 @@ export function VisitWizard({
 
           {scanUnlocked ? (
           <>
-          <div className="mt-5 inline-flex rounded-xl border border-border bg-surface-2/60 p-1 shadow-inner">
+          {/* PRIMARY action — Run Health Check (same engine as /self-check). */}
+          <div className="card mt-5 p-6">
+            <div className="text-[11px] font-bold uppercase tracking-wider text-brand">
+              Primary
+            </div>
+            <h3 className="mt-1 font-display text-lg font-bold text-foreground">
+              Run the health check
+            </h3>
+            <p className="mt-1 text-sm text-muted">
+              Starts a silent diagnostic on the machine being checked. Takes ~10–70 seconds.
+            </p>
+            <button
+              onClick={runHealthCheck}
+              disabled={starting || triggered}
+              className="btn-primary mt-4 w-full px-5 py-3 font-display text-base disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+            >
+              {starting ? "Starting…" : triggered ? "Running…" : "Run Health Check"}
+            </button>
+            {runError ? <p className="mt-3 text-sm text-bad">{runError}</p> : null}
+            {manualRequired ? (
+              <p className="mt-3 text-sm text-muted">
+                This isn&rsquo;t running on the machine being checked, so start it there using{" "}
+                <b className="text-foreground">Run on the machine being checked</b> below.
+              </p>
+            ) : null}
+          </div>
+
+          {/* ADVANCED / fallback — copy-paste command or download, run on the
+              target PC (also the path used when the server can't launch it). */}
+          <details className="mt-4 rounded-2xl border border-border bg-surface-2/40 p-4" open={manualRequired}>
+          <summary className="cursor-pointer text-sm font-semibold text-brand">
+            Run on the machine being checked (PowerShell / download / admin rights)
+          </summary>
+          <div className="mt-4 inline-flex rounded-xl border border-border bg-surface-2/60 p-1 shadow-inner">
             {(["windows", "mac"] as const).map((o) => (
               <button
                 key={o}
@@ -530,6 +598,7 @@ export function VisitWizard({
               </div>
             </div>
           )}
+          </details>
           </>
           ) : (
             <div className="mt-5 card p-6">
@@ -545,7 +614,7 @@ export function VisitWizard({
           )}
 
           <div className="mt-6 flex flex-wrap items-center gap-4">
-            {scanUnlocked ? (
+            {triggered ? (
               <span className="inline-flex items-center gap-2.5 rounded-full border border-border bg-surface-2/60 px-3.5 py-1.5">
                 <span className="relative flex h-2.5 w-2.5">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand opacity-60" />

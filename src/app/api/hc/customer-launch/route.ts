@@ -45,7 +45,7 @@ export async function POST(request: Request) {
   }
 
   // Locate the technician-created session — never create one here.
-  const session = findLatestByOrder(orderId);
+  const session = await findLatestByOrder(orderId);
   if (!session) {
     return NextResponse.json({ error: "no_health_check" }, { status: 404 });
   }

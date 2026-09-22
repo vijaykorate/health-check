@@ -24,7 +24,7 @@ export async function POST(
     );
   }
 
-  const result = completeSession(id, report);
+  const result = await completeSession(id, report);
   if (!result.ok) {
     return NextResponse.json(
       { error: result.reason },
