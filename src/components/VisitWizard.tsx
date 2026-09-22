@@ -339,6 +339,12 @@ export function VisitWizard({
   const [busy, setBusy] = useState(false);
 
   const [launch, setLaunch] = useState<LaunchInfo | null>(null);
+  const [deliverResult, setDeliverResult] = useState<{
+    pdfUrl: string | null;
+    emailStatus: string | null;
+    whatsappStatus: string | null;
+  } | null>(null);
+  const [deliverError, setDeliverError] = useState<string | null>(null);
   const [os, setOs] = useState<"windows" | "mac">("windows");
   const [otpVerified, setOtpVerified] = useState(false);
 
@@ -426,19 +432,44 @@ export function VisitWizard({
 
   async function submitAndDeliver() {
     setBusy(true);
+    setDeliverError(null);
     setStage("generating");
     try {
-      await fetch(`/api/diagnostics/${id}/deliver`, { method: "POST" });
+      const res = await fetch(`/api/diagnostics/${id}/deliver`, { method: "POST" });
+      const d = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        pdfUrl?: string | null;
+        emailStatus?: string | null;
+        whatsappStatus?: string | null;
+      };
+      if (!res.ok) {
+        // Don't claim success on failure (e.g. 403 admin-consent, 409 not scanned).
+        setDeliverError(d.error || "Couldn't submit the report. Please try again.");
+        setStage("review");
+        return;
+      }
+      setDeliverResult({
+        pdfUrl: d.pdfUrl ?? null,
+        emailStatus: d.emailStatus ?? null,
+        whatsappStatus: d.whatsappStatus ?? null,
+      });
+      setStage("done");
+    } catch {
+      setDeliverError("Couldn't submit the report. Please try again.");
+      setStage("review");
     } finally {
       setBusy(false);
     }
   }
 
-  useEffect(() => {
-    if (stage !== "generating") return;
-    const t = setTimeout(() => setStage("done"), 1600);
-    return () => clearTimeout(t);
-  }, [stage]);
+  // Human-readable label for a backend delivery status (SENT / SKIPPED_* / FAILED:*).
+  function deliveryLabel(status: string | null | undefined): string {
+    if (!status) return "not attempted";
+    if (status === "SENT") return "sent";
+    if (status.startsWith("SKIPPED")) return "not configured";
+    if (status.startsWith("FAILED")) return "failed";
+    return status;
+  }
 
   const issues = useMemo(
     () => Object.entries(inspection).filter(([, v]) => v === "issue"),
@@ -887,6 +918,9 @@ export function VisitWizard({
             >
               ← Back
             </button>
+            {deliverError ? (
+              <p className="mb-3 rounded-lg bg-bad-bg px-3 py-2 text-sm text-bad">{deliverError}</p>
+            ) : null}
             <button
               onClick={submitAndDeliver}
               disabled={busy}
@@ -913,10 +947,31 @@ export function VisitWizard({
         <div className="rounded-2xl border border-ok/40 bg-ok-bg p-6 text-ok">
           <div className="font-display text-lg font-bold">Visit complete</div>
           <p className="mt-1 text-sm">
-            The report was delivered to {view.customerName ?? "the customer"}&rsquo;s mobile app (+ email/WhatsApp).
+            Health Check report generated for {view.customerName ?? "the customer"}.
           </p>
+          <ul className="mt-2 space-y-0.5 text-sm">
+            <li>
+              Email to customer: <b>{deliveryLabel(deliverResult?.emailStatus)}</b>
+            </li>
+            <li>
+              WhatsApp to customer: <b>{deliveryLabel(deliverResult?.whatsappStatus)}</b>
+            </li>
+          </ul>
           <div className="mt-4 flex flex-wrap gap-3">
-            <Link href="/orders" className="inline-block rounded-xl bg-brand px-5 py-2.5 font-display font-semibold text-white hover:bg-brand-strong">
+            {deliverResult?.pdfUrl ? (
+              <a
+                href={deliverResult.pdfUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-block rounded-xl bg-brand px-5 py-2.5 font-display font-semibold text-white hover:bg-brand-strong"
+              >
+                View / download report
+              </a>
+            ) : null}
+            <Link
+              href="/orders"
+              className="inline-block rounded-xl border border-border bg-surface px-5 py-2.5 font-display font-semibold text-foreground hover:border-brand"
+            >
               Back to orders
             </Link>
           </div>

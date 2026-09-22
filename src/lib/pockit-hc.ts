@@ -46,12 +46,26 @@ export async function hcBackend<T = Record<string, unknown>>(
     headers.apiKey = encryptPockit(API_KEY);
     headers.applicationKey = encryptPockit(APPLICATION_KEY);
   }
-  const res = await fetch(BASE + path.replace(/^\//, ""), {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-    cache: "no-store",
-  });
+  let res: Response;
+  try {
+    res = await fetch(BASE + path.replace(/^\//, ""), {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      cache: "no-store",
+    });
+  } catch {
+    // Backend unreachable (e.g. restarting during a deploy, or a network blip).
+    // Return a normal HcResult instead of throwing so BFF routes surface a clean
+    // message rather than a raw 500 with no body.
+    return {
+      httpStatus: 502,
+      ok: false,
+      status: 502,
+      message: "Couldn't reach the server. Please try again.",
+      data: {} as T,
+    };
+  }
   let data: Record<string, unknown> | null = null;
   try {
     data = (await res.json()) as Record<string, unknown>;

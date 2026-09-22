@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { PockitShield, PockitWordmark } from "@/components/Brand";
 
@@ -13,6 +13,31 @@ export function LoginClient() {
   const [hint, setHint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // If a live session already exists, don't show the login form — send the
+  // technician to their visits. This also covers the browser back/forward cache
+  // (bfcache) restore, where the server component doesn't re-run, so pressing
+  // Back after signing in no longer lands on the login form.
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const r = await fetch("/api/orders", { cache: "no-store" });
+        if (!cancelled && r.ok) router.replace("/orders");
+      } catch {
+        /* not signed in / offline — stay on login */
+      }
+    };
+    check();
+    const onShow = (e: PageTransitionEvent) => {
+      if (e.persisted) check();
+    };
+    window.addEventListener("pageshow", onShow);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("pageshow", onShow);
+    };
+  }, [router]);
 
   async function requestOtp() {
     if (busy || !mobile.trim() || !agreed) return;

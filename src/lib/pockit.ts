@@ -164,8 +164,19 @@ export async function fetchTechnicianJobs(
     // name; override the term with POCKIT_HEALTHCHECK_MATCH if it ever changes.
     const term = process.env.POCKIT_HEALTHCHECK_MATCH ?? "health\\s*check";
     const isHealthCheck = new RegExp(term, "i");
-    return json.data
-      .filter((r) => isHealthCheck.test(`${r.SERVICE_NAME ?? ""} ${r.SERVICE_FULL_NAME ?? ""}`))
+    const hcRows = json.data.filter((r) =>
+      isHealthCheck.test(`${r.SERVICE_NAME ?? ""} ${r.SERVICE_FULL_NAME ?? ""}`),
+    );
+    // Only show an order once the technician has actually STARTED the job
+    // (job_card.TRACK_STATUS === 'SJ') — the same precondition createSession
+    // enforces, so every listed order can start a Health Check. Graceful: only
+    // filter when the backend row exposes TRACK_STATUS (otherwise we'd hide
+    // everything if the field name ever changes); orders before job-start drop off.
+    const exposesTrackStatus = hcRows.some((r) => r.TRACK_STATUS != null);
+    const startedRows = exposesTrackStatus
+      ? hcRows.filter((r) => String(r.TRACK_STATUS).toUpperCase() === "SJ")
+      : hcRows;
+    return startedRows
       .map((r) => ({
         orderId: String(r.ORDER_ID ?? r.ORDER_NO ?? r.ORDER_NUMBER ?? ""),
         jobCardNo: String(r.JOB_CARD_NO ?? r.JOB_CARD_NUMBER ?? ""),

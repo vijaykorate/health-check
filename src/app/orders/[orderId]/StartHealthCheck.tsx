@@ -15,10 +15,16 @@ export function StartHealthCheck({ orderId }: { orderId: string }) {
         const res = await fetch(`/api/orders/${orderId}/start`, { method: "POST" });
         if (!res.ok) {
           const d = (await res.json().catch(() => ({}))) as { error?: string };
+          if (res.status === 401) {
+            router.replace("/login?expired=1");
+            return;
+          }
           throw new Error(
             d.error === "not_found"
               ? "This health-check order isn't assigned to you (or is no longer open)."
-              : "Couldn't start the health check. Please try again.",
+              : // Surface the backend's real reason (e.g. "Start the job before
+                // starting a Health Check.") instead of a generic message.
+                d.error || "Couldn't start the health check. Please try again.",
           );
         }
         const d = (await res.json()) as { url: string };
