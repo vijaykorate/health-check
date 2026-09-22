@@ -9,6 +9,7 @@ import { Report } from "@/components/Report";
 import { FindingsPanel } from "@/components/FindingsPanel";
 import { SignOutButton } from "@/components/SignOutButton";
 import { VisitWizard } from "@/components/VisitWizard";
+import { BrandMark } from "@/components/Brand";
 
 const POLL_MS = 1500;
 
@@ -87,9 +88,6 @@ export function CheckClient({ id }: { id: string }) {
               <Link href="/self-check" className="text-sm text-muted hover:text-foreground">
                 ← New check
               </Link>
-              <Link href="/dashboard" className="text-sm text-muted hover:text-foreground">
-                Dashboard
-              </Link>
               <Link href="/orders" className="text-sm text-muted hover:text-foreground">
                 Orders
               </Link>
@@ -98,19 +96,31 @@ export function CheckClient({ id }: { id: string }) {
         </div>
         <div className="flex items-center gap-3">
           {inVisit ? <SignOutButton /> : null}
-          <span className="rounded-lg bg-brand px-2 py-1 font-display text-xs font-bold text-white">
-            id chip.ai
-          </span>
+          <BrandMark />
         </div>
       </div>
 
       {inVisit ? (
-        <div className="mt-4 rounded-2xl border border-border bg-surface-2 px-4 py-3">
-          <div className="text-xs font-semibold uppercase tracking-wide text-muted">
-            On-site visit · running on the customer&rsquo;s machine
-          </div>
-          <div className="mt-0.5 text-sm text-foreground">
-            Order {view!.orderId} · {view!.customerName}
+        <div className="card relative mt-4 overflow-hidden px-5 py-4">
+          <span
+            className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-brand"
+            aria-hidden
+          />
+          <span
+            className="pointer-events-none absolute inset-0 bg-[radial-gradient(600px_120px_at_0%_0%,color-mix(in_srgb,var(--brand)_10%,transparent),transparent)]"
+            aria-hidden
+          />
+          <div className="relative">
+            <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.16em] text-muted">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand opacity-60" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-brand" />
+              </span>
+              On-site visit · running on the customer&rsquo;s machine
+            </div>
+            <div className="mt-1 font-display text-base font-semibold text-foreground">
+              Order {view!.orderId} <span className="text-muted">·</span> {view!.customerName}
+            </div>
           </div>
         </div>
       ) : null}

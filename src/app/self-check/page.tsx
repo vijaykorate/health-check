@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { currentUser } from "@/lib/session-auth";
 import { StartForm } from "@/components/StartForm";
+import { BrandMark } from "@/components/Brand";
 import { CATEGORIES } from "@/lib/categories";
 
 export default async function SelfCheck() {
@@ -11,18 +12,13 @@ export default async function SelfCheck() {
     <main className="flex flex-1 flex-col items-center px-6 py-12 sm:py-20">
       <div className="w-full max-w-2xl">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="rounded-lg bg-brand px-2 py-1 font-display text-sm font-bold text-white">
-              id chip.ai
-            </span>
+          <div className="flex items-center gap-3">
+            <BrandMark />
             <span className="text-sm text-muted">System Health Check</span>
           </div>
           <div className="flex items-center gap-4">
             <Link href="/login" className="text-sm text-muted hover:text-foreground">
               Technician sign-in
-            </Link>
-            <Link href="/dashboard" className="text-sm text-muted hover:text-foreground">
-              Dashboard →
             </Link>
           </div>
         </div>

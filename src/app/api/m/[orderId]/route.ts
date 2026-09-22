@@ -5,30 +5,44 @@
 // SIMULATION: a real build pushes the OTP to the authenticated customer app and
 // this endpoint would be gated to that customer; here it's keyed by orderId.
 import { NextResponse } from "next/server";
-import { getOrder, peekOtp } from "@/lib/accounts";
+import { peekOtp } from "@/lib/accounts";
 import { findLatestByOrder, toView } from "@/lib/store";
+import { readConsent, readConsentDecision, readReport } from "@/lib/shared-order";
 
 export async function GET(
   _request: Request,
   ctx: { params: Promise<{ orderId: string }> },
 ) {
   const { orderId } = await ctx.params;
-  const order = getOrder(orderId);
-  if (!order) {
+
+  // Order metadata comes from the technician-created session (the source of
+  // truth for a real Pockit order).
+  const session = findLatestByOrder(orderId);
+  if (!session) {
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }
+  const customerName = session.customerName ?? null;
+  const device = [session.manufacturer, session.model].filter(Boolean).join(" ") || null;
 
-  const consent = peekOtp("consent", orderId);
-  const session = findLatestByOrder(orderId);
-  // The report reaches the customer only after the technician submits at Review.
-  const delivered = session?.delivered === true && !!session?.diagnostic;
+  // Prefer the shared store (works cross-instance on Vercel); fall back to the
+  // in-memory state so local single-process dev behaves exactly as before.
+  const localDelivered = session?.delivered === true && !!session?.diagnostic;
+
+  const consentCode =
+    (await readConsent(orderId)) ?? peekOtp("consent", orderId)?.code ?? null;
+  const decision = await readConsentDecision(orderId);
+  const report =
+    (await readReport(orderId)) ?? (localDelivered ? toView(session!).diagnostic : null);
 
   return NextResponse.json({
-    orderId: order.orderId,
-    customerName: order.customerName,
-    device: `${order.manufacturer} ${order.model}`,
-    consentCode: consent?.code ?? null,
-    report: delivered ? toView(session!).diagnostic : null,
-    status: session?.status ?? null,
+    orderId,
+    customerName,
+    device,
+    // Consent sync (Phase 2): technician requested → customer decides → both read here.
+    consentRequested: consentCode !== null,
+    consentCode,
+    consentDecision: decision?.decision ?? null,
+    report,
+    status: report ? "scanned" : session?.status ?? null,
   });
 }

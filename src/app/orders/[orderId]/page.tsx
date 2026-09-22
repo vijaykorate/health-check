@@ -1,9 +1,8 @@
 import { redirect } from "next/navigation";
 import { currentUser } from "@/lib/session-auth";
-import { getOrder } from "@/lib/accounts";
-import { ConsentClient } from "./ConsentClient";
+import { StartHealthCheck } from "./StartHealthCheck";
 
-export default async function ConsentPage({
+export default async function OrderStartPage({
   params,
 }: {
   params: Promise<{ orderId: string }>;
@@ -12,7 +11,8 @@ export default async function ConsentPage({
   if (!me) redirect("/login");
   if (me.role !== "technician") redirect("/login");
   const { orderId } = await params;
-  const order = getOrder(orderId);
-  if (!order || order.assignedTechnicianId !== me.user.id) redirect("/orders");
-  return <ConsentClient order={order} />;
+  // The session is created via POST (not here) so navigation/prefetch has no
+  // side effects; the client component starts the health check and forwards
+  // to the wizard.
+  return <StartHealthCheck orderId={orderId} />;
 }

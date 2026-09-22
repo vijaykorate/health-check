@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 
 /** End-of-visit sign-out — clears the short-lived session (feature: security). */
-export function SignOutButton({ label = "End visit & sign out" }: { label?: string }) {
+export function SignOutButton({ label = "Log out" }: { label?: string }) {
   const router = useRouter();
   async function signOut() {
     await fetch("/api/auth/logout", { method: "POST" });

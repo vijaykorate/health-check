@@ -3,18 +3,55 @@
 import { useEffect, useState } from "react";
 import type { DiagnosticReport } from "@/lib/types";
 import { Report } from "@/components/Report";
+import { BrandMark } from "@/components/Brand";
 
 interface CustomerData {
   orderId: string;
   customerName: string;
   device: string;
+  consentRequested?: boolean;
   consentCode: string | null;
+  consentDecision?: "accepted" | "declined" | null;
   report: DiagnosticReport | null;
   status: string | null;
 }
 
 export function CustomerClient({ orderId }: { orderId: string }) {
   const [data, setData] = useState<CustomerData | null>(null);
+  // Launch token from /api/hc/customer-launch (present when opened from the
+  // Customer App). It authorizes this customer to decide consent for this order.
+  // Read once at init (SSR-guarded); the consent UI only renders after `data`
+  // loads, so this never causes a hydration mismatch.
+  const [token] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      return new URLSearchParams(window.location.search).get("t");
+    } catch {
+      return null;
+    }
+  });
+  const [deciding, setDeciding] = useState(false);
+  const [consentError, setConsentError] = useState<string | null>(null);
+
+  async function decide(decision: "accepted" | "declined") {
+    if (!token || deciding) return;
+    setDeciding(true);
+    setConsentError(null);
+    try {
+      const res = await fetch(`/api/hc/consent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId, decision, t: token }),
+      });
+      if (!res.ok) throw new Error(`(${res.status})`);
+      // Reflect immediately; the poll will confirm from the shared KV.
+      setData((d) => (d ? { ...d, consentDecision: decision } : d));
+    } catch {
+      setConsentError("Couldn't record your response. Check your connection and try again.");
+    } finally {
+      setDeciding(false);
+    }
+  }
 
   function downloadJson() {
     if (!data?.report) return;
@@ -54,9 +91,7 @@ export function CustomerClient({ orderId }: { orderId: string }) {
         {/* App bar */}
         <div className="flex items-center justify-between border-b border-border bg-surface-2 px-5 py-3">
           <div className="flex items-center gap-2">
-            <span className="rounded-lg bg-brand px-2 py-1 font-display text-xs font-bold text-white">
-              Pockit
-            </span>
+            <BrandMark />
             <span className="text-xs font-medium text-muted">Customer app</span>
           </div>
           <span className="text-[11px] text-muted">{data?.device ?? ""}</span>
@@ -112,7 +147,54 @@ export function CustomerClient({ orderId }: { orderId: string }) {
                 personal information are touched.
               </p>
 
-              {data.consentCode ? (
+              {data.consentDecision === "accepted" ? (
+                // Customer approved in-app — the technician's wizard continues.
+                <div className="mt-6 rounded-2xl border border-ok/40 bg-ok-bg p-5 text-ok">
+                  <div className="font-display font-semibold">You approved the health check ✓</div>
+                  <p className="mt-1 text-sm">
+                    The technician can now run the scan. You can keep this screen open — your
+                    report will appear here when it&rsquo;s ready.
+                  </p>
+                </div>
+              ) : data.consentDecision === "declined" ? (
+                <div className="mt-6 rounded-2xl border border-bad/40 bg-bad-bg p-5 text-bad">
+                  <div className="font-display font-semibold">You declined</div>
+                  <p className="mt-1 text-sm">No scan will run. You can approve below if you change your mind.</p>
+                  <button
+                    onClick={() => decide("accepted")}
+                    disabled={deciding || !token}
+                    className="btn-primary mt-3 px-4 py-2 text-sm disabled:opacity-60"
+                  >
+                    {deciding ? "Sending…" : "Approve instead"}
+                  </button>
+                </div>
+              ) : token && data.consentRequested ? (
+                // Launched from the Customer App with a valid token → decide in-app.
+                <div className="mt-6 rounded-2xl border border-brand/30 bg-brand/5 p-5">
+                  <div className="text-sm text-foreground">
+                    Your technician has requested a health check on this device. Approving allows a
+                    scan of <b>hardware &amp; software only</b>.
+                  </div>
+                  <div className="mt-4 flex gap-3">
+                    <button
+                      onClick={() => decide("accepted")}
+                      disabled={deciding}
+                      className="btn-primary flex-1 px-4 py-3 font-display disabled:opacity-60"
+                    >
+                      {deciding ? "Sending…" : "Approve health check"}
+                    </button>
+                    <button
+                      onClick={() => decide("declined")}
+                      disabled={deciding}
+                      className="flex-1 rounded-xl border border-border px-4 py-3 text-sm font-semibold text-muted disabled:opacity-60"
+                    >
+                      Decline
+                    </button>
+                  </div>
+                  {consentError ? <p className="mt-3 text-sm text-bad">{consentError}</p> : null}
+                </div>
+              ) : data.consentCode ? (
+                // No launch token (read-aloud fallback): show the code to relay verbally.
                 <div className="mt-6 rounded-2xl border border-brand/30 bg-brand/5 p-5">
                   <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-brand">
                     Your consent code

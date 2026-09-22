@@ -34,11 +34,11 @@ export async function GET(
     windows: {
       standard: buildPasteCommand({ ...common, stressTest: session.stressTest, elevated: false }),
       elevated: buildPasteCommand({ ...common, stressTest: session.stressTest, elevated: true }),
-      download: "/api/launcher/ps1?download=1",
+      download: `/api/diagnostics/${id}/download?os=windows`,
     },
     mac: {
       command: buildMacCommand(common),
-      download: "/api/launcher/sh",
+      download: `/api/diagnostics/${id}/download?os=mac`,
     },
   });
 }

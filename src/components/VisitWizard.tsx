@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import type {
   ExternalReference,
@@ -47,28 +47,39 @@ function Stepper({ stage }: { stage: Stage }) {
         : order.indexOf(s);
   const cur = idxOf(stage);
   return (
-    <div className="flex items-center gap-2 overflow-x-auto py-1">
+    <div className="flex items-center overflow-x-auto pb-1">
       {FLOW.map((s, i) => {
         const state = i < cur ? "done" : i === cur ? "current" : "todo";
         return (
-          <div key={s.key} className="flex items-center gap-2">
-            <span
-              className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${
-                state === "done"
-                  ? "bg-ok text-white"
-                  : state === "current"
-                    ? "bg-brand text-white"
-                    : "bg-surface-2 text-muted"
-              }`}
-            >
-              {state === "done" ? "✓" : i + 1}
-            </span>
-            <span
-              className={`text-xs font-semibold ${state === "todo" ? "text-muted" : "text-foreground"}`}
-            >
-              {s.label}
-            </span>
-            {i < FLOW.length - 1 ? <span className="text-muted">·</span> : null}
+          <div key={s.key} className="flex shrink-0 items-center">
+            <div className="flex items-center gap-2.5">
+              <span
+                className={[
+                  "flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold transition-all duration-300",
+                  state === "done"
+                    ? "bg-brand text-white shadow-[0_4px_12px_-4px_var(--brand)]"
+                    : state === "current"
+                      ? "bg-brand text-white ring-4 ring-brand/25 shadow-[0_0_0_1px_var(--brand),0_8px_20px_-6px_var(--brand)]"
+                      : "border border-border bg-surface-2 text-muted",
+                ].join(" ")}
+              >
+                {state === "done" ? "✓" : i + 1}
+              </span>
+              <span
+                className={`text-xs font-semibold tracking-tight transition-colors duration-300 ${
+                  state === "todo" ? "text-muted" : "text-foreground"
+                }`}
+              >
+                {s.label}
+              </span>
+            </div>
+            {i < FLOW.length - 1 ? (
+              <span
+                className={`mx-2.5 h-px w-6 rounded-full transition-colors duration-500 sm:w-10 ${
+                  i < cur ? "bg-brand" : "bg-border"
+                }`}
+              />
+            ) : null}
           </div>
         );
       })}
@@ -101,23 +112,166 @@ function CopyBtn({ text }: { text: string }) {
           /* clipboard blocked */
         }
       }}
-      className="rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong"
+      className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+        copied
+          ? "bg-ok/20 text-ok"
+          : "bg-white/10 text-slate-200 hover:bg-white/20"
+      }`}
     >
-      {copied ? "Copied!" : "Copy"}
+      {copied ? (
+        <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5" aria-hidden>
+          <path
+            fillRule="evenodd"
+            d="M16.7 5.3a1 1 0 0 1 0 1.4l-7.5 7.5a1 1 0 0 1-1.4 0l-3.5-3.5a1 1 0 1 1 1.4-1.4l2.8 2.8 6.8-6.8a1 1 0 0 1 1.4 0Z"
+            clipRule="evenodd"
+          />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-3.5 w-3.5" aria-hidden>
+          <rect x="7" y="7" width="9" height="9" rx="2" />
+          <path d="M13 4H5a1 1 0 0 0-1 1v8" strokeLinecap="round" />
+        </svg>
+      )}
+      {copied ? "Copied" : "Copy"}
     </button>
   );
 }
 
-function CommandBlock({ label, command }: { label: string; command: string }) {
+// Conservative, dependency-free highlighter — colors strings, $variables,
+// -flags and a handful of cmdlets. Anything ambiguous stays plain, so it can't
+// mangle a command the technician is about to run.
+const CODE_RE =
+  /("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|(\$[A-Za-z_][\w:]*)|(\s--?[A-Za-z][\w-]*)|\b(Invoke-WebRequest|Invoke-RestMethod|Start-Process|powershell\.exe|try|catch|curl|chmod)\b/g;
+
+function highlightCommand(code: string): ReactNode[] {
+  const out: ReactNode[] = [];
+  let last = 0;
+  let k = 0;
+  let m: RegExpExecArray | null;
+  CODE_RE.lastIndex = 0;
+  while ((m = CODE_RE.exec(code)) !== null) {
+    if (m.index > last) out.push(code.slice(last, m.index));
+    if (m[1]) out.push(<span key={k++} className="text-emerald-300">{m[1]}</span>);
+    else if (m[2]) out.push(<span key={k++} className="text-sky-300">{m[2]}</span>);
+    else if (m[3]) out.push(<span key={k++} className="text-violet-300">{m[3]}</span>);
+    else if (m[4]) out.push(<span key={k++} className="text-amber-200">{m[4]}</span>);
+    last = CODE_RE.lastIndex;
+  }
+  if (last < code.length) out.push(code.slice(last));
+  return out;
+}
+
+function Terminal({ lang, command }: { lang: string; command: string }) {
   return (
-    <div className="mt-3">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-foreground">{label}</span>
-        <CopyBtn text={command} />
+    <div className="mt-2 overflow-hidden rounded-xl border border-white/10 bg-[#0b0e1c] shadow-[0_16px_40px_-24px_rgba(0,0,0,0.8)]">
+      <div className="flex items-center gap-2 border-b border-white/10 bg-white/[0.03] px-3.5 py-2">
+        <span className="flex gap-1.5" aria-hidden>
+          <span className="h-3 w-3 rounded-full bg-[#ff5f57]" />
+          <span className="h-3 w-3 rounded-full bg-[#febc2e]" />
+          <span className="h-3 w-3 rounded-full bg-[#28c840]" />
+        </span>
+        <span className="ml-1 font-mono text-[11px] font-medium tracking-wide text-slate-400">
+          {lang}
+        </span>
+        <span className="ml-auto">
+          <CopyBtn text={command} />
+        </span>
       </div>
-      <pre className="mt-1 max-h-40 overflow-auto rounded-lg bg-surface-2 p-3 font-mono text-[11px] leading-relaxed text-foreground">
-        {command}
+      <pre className="overflow-x-auto px-4 py-3.5 font-mono text-[12.5px] leading-relaxed text-slate-200">
+        <code>{highlightCommand(command)}</code>
       </pre>
+    </div>
+  );
+}
+
+function CommandLabel({ children }: { children: ReactNode }) {
+  return (
+    <span className="text-[11px] font-bold uppercase tracking-wider text-muted">{children}</span>
+  );
+}
+
+// Customer-consent sync (Phase 2): the technician requests consent, the customer
+// approves in their own app, and the decision flows back through the shared KV.
+// This panel drives the technician side and reflects the live decision.
+function ConsentPanel({
+  orderId,
+  onDecision,
+}: {
+  orderId: string;
+  onDecision?: (d: "accepted" | "declined" | null) => void;
+}) {
+  const [requested, setRequested] = useState(false);
+  const [decision, setDecision] = useState<"accepted" | "declined" | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const poll = () =>
+      fetch(`/api/m/${orderId}`, { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (!active || !d) return;
+          if (d.consentRequested) setRequested(true);
+          const dec = d.consentDecision ?? null;
+          setDecision(dec);
+          onDecision?.(dec);
+        })
+        .catch(() => {});
+    poll();
+    const t = setInterval(poll, 2500);
+    return () => {
+      active = false;
+      clearInterval(t);
+    };
+  }, [orderId, onDecision]);
+
+  async function requestConsent() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/orders/${orderId}/consent/request`, { method: "POST" });
+      if (!res.ok) throw new Error(`(${res.status})`);
+      setRequested(true);
+    } catch {
+      setError("Couldn't request consent. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card mb-5 p-5">
+      <div className="flex items-center gap-2.5">
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand/12 text-base">🔒</span>
+        <div>
+          <div className="font-display font-semibold text-foreground">Customer consent</div>
+          <div className="text-xs text-muted">Required before the scan — approved on the customer&rsquo;s app.</div>
+        </div>
+        <span className="ml-auto">
+          {decision === "accepted" ? (
+            <span className="rounded-full bg-ok-bg px-3 py-1 text-xs font-semibold text-ok">Approved ✓</span>
+          ) : decision === "declined" ? (
+            <span className="rounded-full bg-bad-bg px-3 py-1 text-xs font-semibold text-bad">Declined</span>
+          ) : requested ? (
+            <span className="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-xs font-semibold text-muted">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-brand" />
+              Waiting for customer…
+            </span>
+          ) : null}
+        </span>
+      </div>
+      {decision !== "accepted" && !requested ? (
+        <button
+          onClick={requestConsent}
+          disabled={busy}
+          className="btn-primary mt-4 px-4 py-2 text-sm disabled:opacity-60"
+        >
+          {busy ? "Requesting…" : "Request customer consent"}
+        </button>
+      ) : null}
+      {error ? <p className="mt-3 text-sm text-bad">{error}</p> : null}
     </div>
   );
 }
@@ -137,6 +291,8 @@ export function VisitWizard({
   // Launch step
   const [launch, setLaunch] = useState<LaunchInfo | null>(null);
   const [os, setOs] = useState<"windows" | "mac">("windows");
+  // The scan commands are revealed only once the customer approves consent.
+  const [consentAccepted, setConsentAccepted] = useState(false);
 
   // Inspection state
   const [inspection, setInspection] = useState<Record<string, InspectionStatus>>({});
@@ -152,6 +308,12 @@ export function VisitWizard({
 
   const running = view.status === "running";
   const scanDone = view.status === "scanned" || view.status === "completed";
+  const handleConsentDecision = useCallback(
+    (d: "accepted" | "declined" | null) => setConsentAccepted(d === "accepted"),
+    [],
+  );
+  // Scan commands unlock once the customer approves (self-checks have no order).
+  const scanUnlocked = !view.orderId || consentAccepted;
 
   // Fetch the launch commands for this session.
   useEffect(() => {
@@ -264,21 +426,34 @@ export function VisitWizard({
       {/* 0 · Launch — run the scan on the machine being serviced */}
       {stage === "launch" ? (
         <div>
-          <h2 className="font-display text-xl font-bold text-foreground">
+          <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-brand">
+            Step 1 · Launch
+          </div>
+          <h2 className="mt-1.5 font-display text-2xl font-bold tracking-tight text-foreground">
             Run the health check on this machine
           </h2>
-          <p className="mt-1 text-sm text-muted">
+          <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted">
             Paste the command into an open terminal, or download and run the file. Nothing is
             saved on the machine — results stream straight back here.
           </p>
 
-          <div className="mt-4 inline-flex rounded-xl border border-border bg-surface p-1">
+          {view.orderId ? (
+            <div className="mt-5">
+              <ConsentPanel orderId={view.orderId} onDecision={handleConsentDecision} />
+            </div>
+          ) : null}
+
+          {scanUnlocked ? (
+          <>
+          <div className="mt-5 inline-flex rounded-xl border border-border bg-surface-2/60 p-1 shadow-inner">
             {(["windows", "mac"] as const).map((o) => (
               <button
                 key={o}
                 onClick={() => setOs(o)}
-                className={`rounded-lg px-4 py-1.5 text-sm font-semibold ${
-                  os === o ? "bg-brand text-white" : "text-muted"
+                className={`rounded-lg px-5 py-1.5 text-sm font-semibold transition-all duration-200 ${
+                  os === o
+                    ? "bg-brand text-white shadow-[0_8px_18px_-8px_var(--brand)]"
+                    : "text-muted hover:text-foreground"
                 }`}
               >
                 {o === "windows" ? "Windows" : "macOS"}
@@ -287,46 +462,105 @@ export function VisitWizard({
           </div>
 
           {!launch ? (
-            <p className="mt-4 text-sm text-muted">Preparing command…</p>
-          ) : os === "windows" ? (
-            <div className="mt-4 rounded-2xl border border-border bg-surface p-4">
-              <p className="text-sm text-foreground">
-                Open <b>PowerShell</b> on the customer&rsquo;s Windows PC and paste:
-              </p>
-              <CommandBlock label="Standard" command={launch.windows.standard} />
-              <CommandBlock label="With admin rights (UAC prompt)" command={launch.windows.elevated} />
-              <a
-                href={launch.windows.download}
-                className="mt-3 inline-block rounded-xl border border-brand px-4 py-2 text-sm font-semibold text-brand hover:bg-brand/10"
-              >
-                ↓ Download .ps1 &amp; run instead
-              </a>
+            <div className="mt-5 flex items-center gap-3 rounded-2xl border border-border bg-surface p-6 text-sm text-muted">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-brand" />
+              Preparing command…
             </div>
           ) : (
-            <div className="mt-4 rounded-2xl border border-border bg-surface p-4">
-              <p className="text-sm text-foreground">
-                Open <b>Terminal</b> on the customer&rsquo;s Mac and paste:
+            <div className="card mt-5 p-6">
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand/12 text-brand">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden>
+                    <path d="m5 8 4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M13 16h6" strokeLinecap="round" />
+                  </svg>
+                </span>
+                <p className="text-sm text-foreground">
+                  {os === "windows" ? (
+                    <>Open <b>PowerShell</b> on the customer&rsquo;s Windows PC and paste:</>
+                  ) : (
+                    <>Open <b>Terminal</b> on the customer&rsquo;s Mac and paste:</>
+                  )}
+                </p>
+              </div>
+
+              {os === "windows" ? (
+                <div className="mt-5 space-y-5">
+                  <div>
+                    <CommandLabel>Standard</CommandLabel>
+                    <Terminal lang="Windows PowerShell" command={launch.windows.standard} />
+                  </div>
+                  <div>
+                    <CommandLabel>With admin rights · UAC prompt</CommandLabel>
+                    <Terminal lang="Windows PowerShell (elevated)" command={launch.windows.elevated} />
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-5">
+                  <CommandLabel>macOS Terminal</CommandLabel>
+                  <Terminal lang="zsh · Terminal" command={launch.mac.command} />
+                </div>
+              )}
+
+              <div className="mt-5 flex flex-col gap-2 border-t border-border pt-5">
+                <a
+                  href={os === "windows" ? launch.windows.download : launch.mac.download}
+                  className="inline-flex w-fit items-center gap-2 rounded-xl border border-brand/50 px-4 py-2 text-sm font-semibold text-brand transition-colors hover:bg-brand/10"
+                >
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" className="h-4 w-4" aria-hidden>
+                    <path d="M10 3v9m0 0 3.5-3.5M10 12 6.5 8.5" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M4 15h12" strokeLinecap="round" />
+                  </svg>
+                  {os === "windows" ? "Download .ps1 & run instead" : "Download .sh & run instead"}
+                </a>
+                {os === "windows" ? (
+                  <p className="text-xs leading-relaxed text-muted">
+                    After it downloads, right-click the file → <b className="text-foreground">Run with PowerShell</b>. This
+                    copy already knows which visit it belongs to — no extra input needed.
+                  </p>
+                ) : (
+                  <p className="text-xs leading-relaxed text-muted">
+                    Then in Terminal:{" "}
+                    <code className="rounded bg-surface-2 px-1 py-0.5 font-mono text-[11px] text-foreground">
+                      chmod +x ~/Downloads/Pockit-Mac-Diagnostic.sh &amp;&amp; ~/Downloads/Pockit-Mac-Diagnostic.sh
+                    </code>
+                    . This copy already knows which visit it belongs to — no flags needed.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+          </>
+          ) : (
+            <div className="mt-5 card p-6">
+              <div className="font-display font-semibold text-foreground">
+                Waiting for customer consent
+              </div>
+              <p className="mt-1 text-sm text-muted">
+                The scan commands appear here once the customer approves the health check on their
+                app. Tap <b className="text-foreground">Request customer consent</b> above, then ask
+                the customer to approve.
               </p>
-              <CommandBlock label="macOS Terminal" command={launch.mac.command} />
-              <a
-                href={launch.mac.download}
-                className="mt-3 inline-block rounded-xl border border-brand px-4 py-2 text-sm font-semibold text-brand hover:bg-brand/10"
-              >
-                ↓ Download .sh &amp; run instead
-              </a>
             </div>
           )}
 
-          <div className="mt-5 flex items-center gap-3">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-brand" />
-            <span className="text-sm text-muted">Waiting for the scan to start…</span>
+          <div className="mt-6 flex flex-wrap items-center gap-4">
+            {scanUnlocked ? (
+              <span className="inline-flex items-center gap-2.5 rounded-full border border-border bg-surface-2/60 px-3.5 py-1.5">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand opacity-60" />
+                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-brand" />
+                </span>
+                <span className="text-sm font-medium text-muted">Waiting for the scan to start…</span>
+              </span>
+            ) : null}
+            <button
+              onClick={onCancel}
+              className="rounded-xl border border-border px-4 py-2 text-sm font-semibold text-muted transition-colors hover:border-bad hover:text-bad"
+            >
+              Cancel
+            </button>
           </div>
-          <button
-            onClick={onCancel}
-            className="mt-4 rounded-xl border border-border px-4 py-2 text-sm font-semibold text-muted hover:border-bad hover:text-bad"
-          >
-            Cancel
-          </button>
         </div>
       ) : null}
 
@@ -665,12 +899,6 @@ export function VisitWizard({
               className="inline-block rounded-xl bg-brand px-5 py-2.5 font-display font-semibold text-white hover:bg-brand-strong"
             >
               Back to orders
-            </Link>
-            <Link
-              href="/dashboard"
-              className="inline-block rounded-xl border border-border px-5 py-2.5 font-display font-semibold text-foreground hover:border-brand"
-            >
-              Territory health checks →
             </Link>
           </div>
         </div>

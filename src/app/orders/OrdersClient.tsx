@@ -5,6 +5,7 @@ import Link from "next/link";
 import { scoreTone } from "@/lib/score";
 import { toneClasses } from "@/lib/ui";
 import { SignOutButton } from "@/components/SignOutButton";
+import { BrandMark } from "@/components/Brand";
 
 interface OrderRow {
   orderId: string;
@@ -71,14 +72,25 @@ function OrderCard({ o }: { o: OrderRow }) {
 
 export function OrdersClient({ technicianName }: { technicianName: string }) {
   const [orders, setOrders] = useState<OrderRow[] | null>(null);
+  const [expired, setExpired] = useState(false);
 
   useEffect(() => {
     let active = true;
-    const load = () =>
-      fetch("/api/orders", { cache: "no-store" })
-        .then((r) => r.json())
-        .then((d) => active && setOrders(d.orders ?? []))
-        .catch(() => active && setOrders([]));
+    const load = async () => {
+      try {
+        const r = await fetch("/api/orders", { cache: "no-store" });
+        if (!active) return;
+        if (r.status === 401) {
+          // Pockit session no longer valid (e.g. signed in on the phone app).
+          setExpired(true);
+          return;
+        }
+        const d = await r.json();
+        setOrders(d.orders ?? []);
+      } catch {
+        /* keep last state; next tick retries */
+      }
+    };
     load();
     const t = setInterval(load, 3000); // reflect in-progress/completed live
     return () => {
@@ -87,6 +99,15 @@ export function OrdersClient({ technicianName }: { technicianName: string }) {
     };
   }, []);
 
+  async function reLogin() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      /* ignore */
+    }
+    window.location.href = "/login";
+  }
+
   const open = orders?.filter((o) => o.state === "open") ?? [];
   const active = orders?.filter((o) => o.state === "in_progress") ?? [];
   const done = orders?.filter((o) => o.state === "completed") ?? [];
@@ -94,10 +115,8 @@ export function OrdersClient({ technicianName }: { technicianName: string }) {
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col px-6 py-10">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="rounded-lg bg-brand px-2 py-1 font-display text-sm font-bold text-white">
-            id chip.ai
-          </span>
+        <div className="flex items-center gap-3">
+          <BrandMark />
           <span className="text-sm text-muted">Signed in — {technicianName}</span>
         </div>
         <SignOutButton />
@@ -109,7 +128,22 @@ export function OrdersClient({ technicianName }: { technicianName: string }) {
         code before the scan starts.
       </p>
 
-      {orders === null ? (
+      {expired ? (
+        <div className="mt-6 rounded-2xl border border-border bg-surface p-5">
+          <p className="font-medium text-foreground">Your session has expired</p>
+          <p className="mt-1 text-sm text-muted">
+            You may have signed in to the Pockit app on another device. Sign in again to
+            reload your assigned orders.
+          </p>
+          <button
+            type="button"
+            onClick={reLogin}
+            className="mt-4 rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white"
+          >
+            Sign in again
+          </button>
+        </div>
+      ) : orders === null ? (
         <div className="mt-10 text-center text-muted">Loading…</div>
       ) : orders.length === 0 ? (
         <div className="mt-6 rounded-2xl border border-border bg-surface p-5 text-muted">

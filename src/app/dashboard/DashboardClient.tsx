@@ -6,6 +6,7 @@ import type { SessionSummary } from "@/lib/types";
 import { scoreTone } from "@/lib/score";
 import { toneClasses } from "@/lib/ui";
 import { SignOutButton } from "@/components/SignOutButton";
+import { BrandMark } from "@/components/Brand";
 
 const STATUS_TONE: Record<string, string> = {
   running: "text-brand",
@@ -74,10 +75,8 @@ export function DashboardClient() {
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-6 py-10">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="rounded-lg bg-brand px-2 py-1 font-display text-sm font-bold text-white">
-            id chip.ai
-          </span>
+        <div className="flex items-center gap-3">
+          <BrandMark />
           <span className="text-sm text-muted">Dashboard</span>
         </div>
         <div className="flex items-center gap-3">

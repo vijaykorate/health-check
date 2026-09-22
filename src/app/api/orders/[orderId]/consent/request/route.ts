@@ -2,8 +2,10 @@
 // In production this pushes to the customer's mobile app; here it lands on the
 // mock customer surface (/m/[orderId]).
 import { NextResponse } from "next/server";
-import { getOrder, issueOtp, DUMMY_OTP } from "@/lib/accounts";
+import { issueOtp, DUMMY_OTP } from "@/lib/accounts";
 import { currentUser } from "@/lib/session-auth";
+import { findLatestByOrder } from "@/lib/store";
+import { publishConsent } from "@/lib/shared-order";
 
 export async function POST(
   _request: Request,
@@ -14,12 +16,16 @@ export async function POST(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const { orderId } = await ctx.params;
-  const order = getOrder(orderId);
-  if (!order || order.assignedTechnicianId !== me.user.id) {
+  // The technician must own the session they're requesting consent for.
+  const session = findLatestByOrder(orderId);
+  if (!session || session.technicianId !== me.user.id) {
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }
-  // Consent OTP is delivered to the customer (channel = orderId).
-  // DEMO: fixed dummy code so it always shows/accepts 123456.
+  // Consent is delivered to the customer (channel = orderId); the customer
+  // approves in their app. Fixed code backs the read-aloud fallback.
   issueOtp("consent", orderId, DUMMY_OTP);
-  return NextResponse.json({ ok: true, sentTo: order.customerMobile });
+  // Mirror to the shared store so the customer's phone — which may hit a
+  // different serverless instance — sees the consent prompt.
+  await publishConsent(orderId, DUMMY_OTP);
+  return NextResponse.json({ ok: true, sentTo: session.customerMobile ?? null });
 }

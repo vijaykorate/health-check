@@ -58,9 +58,73 @@ export function buildLaunchCommand(
   );
 }
 
+/**
+ * Bake session context into the Windows engine's `param()` defaults so a
+ * *downloaded* .ps1 (run with no arguments) still targets the right session and
+ * backend — a bare download otherwise prompts for the mandatory -SessionId and
+ * posts to the localhost fallback. The pasted one-liner passes these as args;
+ * this is the equivalent for the download-and-run path.
+ */
+export function bakePs1Defaults(
+  script: string,
+  params: {
+    sessionId: string;
+    backendUrl: string;
+    complaint: string;
+    category: string;
+    stressTest: boolean;
+  },
+): string {
+  const { sessionId, backendUrl, complaint, category, stressTest } = params;
+  let out = script
+    // Drop Mandatory and give SessionId a baked default.
+    .replace(
+      /\[Parameter\(Mandatory=\$true\)\]\[string\]\$SessionId\s*,/,
+      `[string]$SessionId = ${psQuote(sessionId)},`,
+    )
+    .replace(
+      /\[string\]\$BackendUrl\s*=\s*"[^"]*"\s*,/,
+      `[string]$BackendUrl = ${psQuote(backendUrl)},`,
+    )
+    .replace(
+      /\[string\]\$Complaint\s*=\s*""\s*,/,
+      `[string]$Complaint = ${psQuote(complaint)},`,
+    )
+    .replace(
+      /\[string\]\$Category\s*=\s*""\s*,/,
+      `[string]$Category = ${psQuote(category)},`,
+    );
+  if (stressTest) {
+    out = out.replace(/\[switch\]\$StressTest\b(?!\s*=)/, "[switch]$StressTest = $true");
+  }
+  return out;
+}
+
 /** POSIX single-quote a value for a shell one-liner. */
 export function shQuote(v: string): string {
   return "'" + String(v ?? "").replace(/'/g, "'\\''") + "'";
+}
+
+/**
+ * Bake session context into the macOS engine's default variables so a
+ * downloaded .sh run with no flags still targets the right session/backend
+ * (a bare run otherwise exits "Missing --session-id"). CLI flags still override.
+ */
+export function bakeShDefaults(
+  script: string,
+  params: {
+    sessionId: string;
+    backendUrl: string;
+    complaint: string;
+    category: string;
+  },
+): string {
+  const { sessionId, backendUrl, complaint, category } = params;
+  return script
+    .replace(/^SESSION_ID=""/m, `SESSION_ID=${shQuote(sessionId)}`)
+    .replace(/^BACKEND_URL="[^"]*"/m, `BACKEND_URL=${shQuote(backendUrl)}`)
+    .replace(/^COMPLAINT=""/m, `COMPLAINT=${shQuote(complaint)}`)
+    .replace(/^CATEGORY=""/m, `CATEGORY=${shQuote(category)}`);
 }
 
 /**

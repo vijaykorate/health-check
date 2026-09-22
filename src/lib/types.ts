@@ -166,6 +166,8 @@ export interface SessionRecord {
   /** Case context — set when started through the technician/order flow. */
   orderId: string | null;
   technicianId: string | null;
+  /** Pockit CUSTOMER_ID — used to verify customer↔order ownership on launch. */
+  customerId: string | null;
   territory: string | null;
   customerName: string | null;
   customerMobile: string | null;

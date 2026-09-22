@@ -1,14 +1,8 @@
-// Simulated Pockit backend for the standalone build.
+// Auth + consent primitives for the Health Check app.
 //
-// Stands in for systems this app doesn't own — user directory, order_master,
-// OTP push/SMS, and auth sessions — behind small functions that a real
-// integration would replace. Everything is in-memory + disk-persisted so the
-// two-OTP flow runs end-to-end here.
-//
-// INTEGRATION SEAMS (replace for production):
-//   - deliverOtp()  -> Pockit push (technician app) / customer mobile app
-//   - listOrders()  -> order_master query by technician/territory
-//   - users/orders  -> real identity + job-card sources
+// Technician identity and orders come from the real Pockit backend
+// (src/lib/pockit.ts). This module holds the stateless session cookie, the
+// order-scoped consent token, and the (demo) consent OTP channel.
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 
@@ -36,42 +30,13 @@ export interface Order {
   status: "open" | "closed";
 }
 
-// ── Seed data (stand-in for the real directory + order_master) ──────────────
+// Identity + orders now come from the real Pockit backend (see src/lib/pockit.ts):
+// technicians authenticate via OTP and their jobs are fetched live. No seed
+// users/orders here.
 
-const USERS: User[] = [
-  { id: "tech-1", name: "Ravi Kumar", mobile: "9000000001", role: "technician", territories: ["North"] },
-  { id: "tech-2", name: "Anita Sharma", mobile: "9000000002", role: "technician", territories: ["South"] },
-  { id: "admin-1", name: "Priya Nair", mobile: "9000000010", role: "admin", territories: ["North", "South"] },
-];
-
-const ORDERS: Order[] = [
-  { orderId: "ORD-2026-1001", customerName: "Meera Joshi", customerMobile: "9811111101", deviceType: "Laptop", manufacturer: "HP", model: "Pavilion 14", serviceType: "On-site diagnostic", assignedTechnicianId: "tech-1", territory: "North", status: "open" },
-  { orderId: "ORD-2026-1002", customerName: "Arjun Rao", customerMobile: "9811111102", deviceType: "Laptop", manufacturer: "Dell", model: "Inspiron 15", serviceType: "Battery complaint", assignedTechnicianId: "tech-1", territory: "North", status: "open" },
-  { orderId: "ORD-2026-1003", customerName: "Sana Khan", customerMobile: "9811111103", deviceType: "Desktop", manufacturer: "Lenovo", model: "ThinkCentre", serviceType: "Won't boot", assignedTechnicianId: "tech-2", territory: "South", status: "open" },
-];
-
-/** Dummy demo login — any mobile works with this fixed code. */
+/** Fixed consent code for the customer-consent channel. The customer approves in
+ *  their own app; this also backs the read-aloud fallback. Not a login credential. */
 export const DUMMY_OTP = "123456";
-
-export function findUserByMobile(mobile: string): User | undefined {
-  return USERS.find((u) => u.mobile === mobile.trim());
-}
-
-/** Resolve a login to a user: a seeded account if the number matches, else a
- *  default technician (so any number can sign in for the demo). */
-export function resolveLoginUser(mobile: string): User {
-  return findUserByMobile(mobile) ?? USERS[0];
-}
-export function getUser(id: string): User | undefined {
-  return USERS.find((u) => u.id === id);
-}
-export function getOrder(orderId: string): Order | undefined {
-  return ORDERS.find((o) => o.orderId === orderId);
-}
-/** Orders a technician can start (their own open orders). */
-export function listOrders(technicianId: string): Order[] {
-  return ORDERS.filter((o) => o.assignedTechnicianId === technicianId && o.status === "open");
-}
 
 // ── OTP store (stand-in for push/SMS delivery) ──────────────────────────────
 
@@ -92,6 +57,11 @@ export interface AuthSession {
   token: string;
   userId: string;
   role: Role;
+  /** Display name — carried for real (non-seed) technicians from Pockit. */
+  name?: string;
+  /** Pockit backend token — lets server routes call Pockit as this technician
+   *  (e.g. fetch their real jobs). httpOnly cookie only, never exposed to JS. */
+  pk?: string;
   createdAt: number;
   expiresAt: number;
 }
@@ -174,6 +144,8 @@ const AUTH_SECRET =
 interface SessionPayload {
   userId: string;
   role: Role;
+  name?: string;
+  pk?: string;
   createdAt: number;
   expiresAt: number;
 }
@@ -184,11 +156,18 @@ function sign(data: string): string {
 
 /** Mint a short-lived, self-contained token; the value goes in an httpOnly
  *  cookie (never a URL). Requires no server-side storage. */
-export function createAuthSession(userId: string, role: Role): AuthSession {
+export function createAuthSession(
+  userId: string,
+  role: Role,
+  name?: string,
+  pockitToken?: string,
+): AuthSession {
   const now = Date.now();
   const payload: SessionPayload = {
     userId,
     role,
+    ...(name ? { name } : {}),
+    ...(pockitToken ? { pk: pockitToken } : {}),
     createdAt: now,
     expiresAt: now + SHIFT_TTL_MS,
   };
@@ -230,3 +209,51 @@ export function endAuthSession(token: string | undefined): void {
 }
 
 export const AUTH_COOKIE = "hc_session";
+
+// ── Order-scoped launch token (customer consent) ────────────────────────────
+// A short-lived signed token binding a customer to an order. It authorizes the
+// customer's in-app consent action (from the Customer App WebView) without any
+// login — it is NOT a technician session and grants no wizard access. Reuses
+// the same HMAC as the auth cookie.
+interface OrderTokenPayload {
+  orderId: string;
+  customerId: string;
+  purpose: "customer-consent";
+  expiresAt: number;
+}
+
+export function mintOrderToken(
+  orderId: string,
+  customerId: string,
+  ttlMs: number,
+): string {
+  const payload: OrderTokenPayload = {
+    orderId,
+    customerId,
+    purpose: "customer-consent",
+    expiresAt: Date.now() + ttlMs,
+  };
+  const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  return `${encoded}.${sign(encoded)}`;
+}
+
+export function verifyOrderToken(token: string | undefined): OrderTokenPayload | null {
+  if (!token) return null;
+  const dot = token.lastIndexOf(".");
+  if (dot < 0) return null;
+  const encoded = token.slice(0, dot);
+  const signature = token.slice(dot + 1);
+  const expected = sign(encoded);
+  const a = Buffer.from(signature);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+  let payload: OrderTokenPayload;
+  try {
+    payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+  if (payload.purpose !== "customer-consent") return null;
+  if (Date.now() > payload.expiresAt) return null;
+  return payload;
+}

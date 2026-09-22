@@ -76,6 +76,7 @@ export interface CreateSessionOpts {
   stressTest: boolean;
   orderId?: string | null;
   technicianId?: string | null;
+  customerId?: string | null;
   territory?: string | null;
   customerName?: string | null;
   customerMobile?: string | null;
@@ -113,6 +114,7 @@ export function createSession(opts: CreateSessionOpts): SessionRecord {
     delivered: false,
     orderId: opts.orderId ?? null,
     technicianId: opts.technicianId ?? null,
+    customerId: opts.customerId ?? null,
     territory: opts.territory ?? null,
     customerName: opts.customerName ?? null,
     customerMobile: opts.customerMobile ?? null,
