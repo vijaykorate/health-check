@@ -1,12 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type {
-  ExternalReference,
-  Severity,
-  SimilarCase,
-  TechnicianFindings,
-} from "@/lib/types";
+import type { Severity, TechnicianFindings } from "@/lib/types";
 import { FINDING_OPTIONS, SEVERITIES, QUICK_RECOMMENDATIONS } from "@/lib/findings-data";
 import { severityTone, toneClasses } from "@/lib/ui";
 
@@ -21,9 +16,22 @@ const OUTCOME_TONE: Record<string, "ok" | "warn" | "unknown"> = {
   unknown: "unknown",
 };
 
+// Own-data case as returned by the backend draft-suggestion endpoint
+// (services/HealthCheck/similarCases.js): keyed by DIAGNOSTIC_ID, not `id`.
+interface DraftCase {
+  id?: string;
+  diagnosticId?: string;
+  date: string;
+  complaint?: string | null;
+  category?: string | null;
+  diagnosis?: string | null;
+  recommendation?: string | null;
+  outcome: string;
+}
 interface AiDraft {
-  similarCases: SimilarCase[];
-  external: { summary: string; sources: ExternalReference[] } | null;
+  similarCases: DraftCase[];
+  external: { summary: string; sources: { title?: string; url?: string }[] } | null;
+  /** Backend `available` — whether a draft was produced (NOT an AI-config flag). */
   aiConfigured: boolean;
 }
 
@@ -173,8 +181,8 @@ export function FindingsPanel({
               </p>
             ) : (
               <ul className="mt-2 space-y-2">
-                {ai.similarCases.map((c) => (
-                  <li key={c.id} className="rounded-lg bg-surface p-3">
+                {ai.similarCases.map((c, i) => (
+                  <li key={c.diagnosticId ?? c.id ?? i} className="rounded-lg bg-surface p-3">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-sm font-medium text-foreground">
                         {c.diagnosis ?? c.recommendation}
@@ -201,11 +209,7 @@ export function FindingsPanel({
               External reference{" "}
               <span className="font-normal normal-case">(web, unverified)</span>
             </div>
-            {!ai.aiConfigured ? (
-              <p className="mt-1 text-sm text-muted">
-                Web knowledge not configured (set <code>GEMINI_API_KEY</code> to enable).
-              </p>
-            ) : !ai.external ? (
+            {!ai.external ? (
               <p className="mt-1 text-sm text-muted">
                 No specific external references found.
               </p>

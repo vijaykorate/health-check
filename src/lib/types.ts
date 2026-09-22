@@ -195,6 +195,12 @@ export interface SessionView {
   delivered: boolean;
   orderId: string | null;
   customerName: string | null;
+  /** Backend `DIAGNOSTIC_ID` (IDCHIP-YYYY-NNNNNN), for display/report links. */
+  diagnosticId?: string | null;
+  /** Customer pairing state on the single backend session (Three Frontends,
+   *  One Session): drives the technician's consent gate. */
+  customerConnectionStatus?: "NOT_CONNECTED" | "CONNECTED" | string | null;
+  customerOnline?: boolean;
 }
 
 /** Compact row for the dashboard/history list. */

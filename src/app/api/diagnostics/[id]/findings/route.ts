@@ -1,44 +1,43 @@
-// POST /api/diagnostics/[id]/findings — save technician findings.
+// POST /api/diagnostics/[id]/findings — BFF proxy to backend
+// `POST /api/diagnostics/:id/findings` (wizard.postFindings).
 import { NextResponse } from "next/server";
-import { setFindings } from "@/lib/store";
-import type { Severity } from "@/lib/types";
-
-const SEVERITIES = new Set<Severity>(["Low", "Medium", "High", "Critical"]);
+import { currentUser } from "@/lib/session-auth";
+import { hcBackend } from "@/lib/pockit-hc";
 
 export async function POST(
   request: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
+  const me = await currentUser();
+  if (!me || me.role !== "technician") {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
   const { id } = await ctx.params;
-
   let body: {
-    primaryFinding?: string;
-    severity?: string;
-    diagnosis?: string;
-    recommendation?: string;
+    primaryFinding?: string | null;
+    severity?: string | null;
+    diagnosis?: string | null;
+    recommendation?: string | null;
   } = {};
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    /* empty body ok */
   }
-
-  const severity =
-    body.severity && SEVERITIES.has(body.severity as Severity)
-      ? (body.severity as Severity)
-      : null;
-
-  const result = await setFindings(id, {
-    primaryFinding: body.primaryFinding?.trim() || null,
-    severity,
-    diagnosis: body.diagnosis?.trim() || null,
-    recommendation: body.recommendation?.trim() || null,
+  const r = await hcBackend(`api/diagnostics/${encodeURIComponent(id)}/findings`, {
+    method: "POST",
+    token: me.pockitToken,
+    body: {
+      primaryFinding: body.primaryFinding ?? null,
+      severity: body.severity ?? null,
+      diagnosis: body.diagnosis ?? null,
+      recommendation: body.recommendation ?? null,
+    },
   });
-
-  if (!result.ok) {
+  if (!r.ok) {
     return NextResponse.json(
-      { error: result.reason },
-      { status: result.reason === "not_found" ? 404 : 409 },
+      { error: r.message ?? "Failed to save findings." },
+      { status: r.status >= 400 ? r.status : 500 },
     );
   }
   return NextResponse.json({ ok: true });

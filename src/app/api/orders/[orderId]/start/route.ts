@@ -1,12 +1,12 @@
-// POST /api/orders/[orderId]/start — the signed-in technician starts (or
-// resumes) the health check for one of their real Pockit orders. Resolves the
-// order from Pockit (their assigned jobs), reuses an existing non-cancelled
-// session, else creates one, and returns the wizard URL. Cookie-authenticated;
-// a technician can only start their own assigned order.
+// POST /api/orders/[orderId]/start — BFF proxy. Creates/reuses the ONE backend
+// Health Check session for this order via the existing Pockit backend
+// `POST /api/diagnostics` (createSession allocates DIAGNOSTIC_ID, enforces the
+// JOB_CARD_ID-unique + job-started invariants). No local session is created —
+// the backend is the single source of truth (Three Frontends, One Session).
 import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/session-auth";
-import { createSession, findLatestByOrder } from "@/lib/store";
 import { fetchTechnicianJobs } from "@/lib/pockit";
+import { hcBackend } from "@/lib/pockit-hc";
 
 export async function POST(
   _request: Request,
@@ -18,53 +18,35 @@ export async function POST(
   }
   const { orderId } = await ctx.params;
 
-  // Reuse an existing session for this order (unless it was cancelled/failed).
-  const existing = await findLatestByOrder(orderId);
-  if (existing && existing.status !== "failed") {
-    return NextResponse.json({ url: `/check/${existing.id}` });
-  }
-
-  // Resolve the order context and verify it belongs to this technician.
-  let context: {
-    customerId: string | null;
-    customerName: string | null;
-    customerMobile: string | null;
-    complaint: string;
-    territory: string | null;
-  } | null = null;
-
+  // Best-effort customer context for the backend row (name/phone come from the
+  // request in createSession). Read from the technician's real Pockit jobs.
+  let customerName: string | null = null;
+  let customerPhone: string | null = null;
   if (me.pockitToken) {
     const jobs = await fetchTechnicianJobs(me.pockitToken, me.user.id);
-    if (jobs === null) {
-      return NextResponse.json({ error: "session_expired" }, { status: 401 });
-    }
-    const job = jobs.find((j) => j.orderId === orderId);
+    const job = jobs?.find((j) => j.orderId === orderId);
     if (job) {
-      context = {
-        customerId: job.customerId || null,
-        customerName: job.customerName || null,
-        customerMobile: job.customerMobile || null,
-        complaint: job.serviceType,
-        territory: job.territory || null,
-      };
+      customerName = job.customerName || null;
+      customerPhone = job.customerMobile || null;
     }
   }
-  if (!context) {
-    // Not one of this technician's assigned Health Check orders.
-    return NextResponse.json({ error: "not_found" }, { status: 404 });
-  }
 
-  const session = await createSession({
-    complaint: context.complaint,
-    category: "",
-    stressTest: false,
-    orderId,
-    technicianId: me.user.id,
-    customerId: context.customerId,
-    customerName: context.customerName,
-    customerMobile: context.customerMobile,
-    territory: context.territory,
+  const r = await hcBackend<{ sessionId?: string; id?: string }>("api/diagnostics", {
+    method: "POST",
+    token: me.pockitToken,
+    body: { orderId, technicianId: me.user.id, customerName, customerPhone },
   });
-
-  return NextResponse.json({ url: `/check/${session.id}` });
+  if (!r.ok) {
+    // Surface the backend's own message (e.g. 409 "Start the job before
+    // starting a Health Check") rather than bypassing the requirement.
+    return NextResponse.json(
+      { error: r.message ?? "Could not start Health Check." },
+      { status: r.status >= 400 ? r.status : 409 },
+    );
+  }
+  const sessionId = r.data.sessionId || r.data.id;
+  if (!sessionId) {
+    return NextResponse.json({ error: "Backend did not return a session." }, { status: 502 });
+  }
+  return NextResponse.json({ url: `/check/${sessionId}` });
 }

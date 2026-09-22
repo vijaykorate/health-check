@@ -79,20 +79,9 @@ export function CheckClient({ id }: { id: string }) {
     <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col px-6 py-10">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          {inVisit ? (
-            <Link href="/orders" className="text-sm text-muted hover:text-foreground">
-              ← Orders
-            </Link>
-          ) : (
-            <>
-              <Link href="/self-check" className="text-sm text-muted hover:text-foreground">
-                ← New check
-              </Link>
-              <Link href="/orders" className="text-sm text-muted hover:text-foreground">
-                Orders
-              </Link>
-            </>
-          )}
+          <Link href="/orders" className="text-sm text-muted hover:text-foreground">
+            ← Orders
+          </Link>
         </div>
         <div className="flex items-center gap-3">
           {inVisit ? <SignOutButton /> : null}
@@ -141,10 +130,10 @@ export function CheckClient({ id }: { id: string }) {
             {view.scanError ?? "The diagnostic engine could not complete."}
           </p>
           <Link
-            href={view.orderId ? `/orders/${view.orderId}` : "/self-check"}
+            href="/orders"
             className="mt-4 inline-block rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white"
           >
-            Try again
+            Back to orders
           </Link>
         </div>
       ) : done && view.diagnostic ? (
@@ -164,10 +153,10 @@ export function CheckClient({ id }: { id: string }) {
           <FindingsPanel sessionId={id} initial={view.technician} />
           <div className="text-center">
             <Link
-              href={inVisit ? "/orders" : "/self-check"}
+              href="/orders"
               className="inline-block rounded-xl bg-brand px-5 py-3 font-display font-semibold text-white hover:bg-brand-strong"
             >
-              {inVisit ? "Back to orders" : "Run another check"}
+              Back to orders
             </Link>
           </div>
         </div>

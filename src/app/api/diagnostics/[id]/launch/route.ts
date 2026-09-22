@@ -1,44 +1,48 @@
-// GET /api/diagnostics/[id]/launch — copy-paste commands + download links for
-// the technician to run the scan on the machine being serviced (Win & Mac).
+// GET /api/diagnostics/[id]/launch — BFF proxy. Relays the backend-generated
+// launcher commands/links (from `GET /api/diagnostics/:id`) into the LaunchInfo
+// shape the wizard already renders. The launcher points at the BACKEND origin
+// and the diagnostic script posts progress/complete/fail directly to the
+// backend — Next.js never generates a launcher.
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/store";
-import { buildPasteCommand, buildMacCommand } from "@/lib/launch";
+import { currentUser } from "@/lib/session-auth";
+import { hcBackend, backendUrl } from "@/lib/pockit-hc";
 
-function backendUrlFrom(request: Request): string {
-  if (process.env.PUBLIC_BASE_URL) return process.env.PUBLIC_BASE_URL;
-  const host = request.headers.get("host");
-  if (host) {
-    const proto = request.headers.get("x-forwarded-proto") ?? "http";
-    return `${proto}://${host}`;
-  }
-  return "http://localhost:3000";
+interface Detail {
+  launcherPsCommand?: string;
+  launcherPsCommandElevated?: string;
+  launcherBatUrl?: string;
+  launcherCurlCommand?: string;
+  launcherCommandUrl?: string;
 }
 
 export async function GET(
-  request: Request,
+  _request: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
-  const { id } = await ctx.params;
-  const session = await getSession(id);
-  if (!session) {
-    return NextResponse.json({ error: "Session not found" }, { status: 404 });
+  const me = await currentUser();
+  if (!me || me.role !== "technician") {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const backendUrl = backendUrlFrom(request);
-  const common = {
-    backendUrl,
-    sessionId: id,
-    complaint: session.complaint,
-    category: session.category,
-  };
+  const { id } = await ctx.params;
+  const r = await hcBackend<Detail>(`api/diagnostics/${encodeURIComponent(id)}`, {
+    token: me.pockitToken,
+  });
+  if (!r.ok) {
+    return NextResponse.json(
+      { error: r.message ?? "Session not found." },
+      { status: r.status >= 400 ? r.status : 404 },
+    );
+  }
+  const d = r.data;
   return NextResponse.json({
     windows: {
-      standard: buildPasteCommand({ ...common, stressTest: session.stressTest, elevated: false }),
-      elevated: buildPasteCommand({ ...common, stressTest: session.stressTest, elevated: true }),
-      download: `/api/diagnostics/${id}/download?os=windows`,
+      standard: d.launcherPsCommand ?? "",
+      elevated: d.launcherPsCommandElevated ?? "",
+      download: d.launcherBatUrl ? backendUrl(d.launcherBatUrl) : "",
     },
     mac: {
-      command: buildMacCommand(common),
-      download: `/api/diagnostics/${id}/download?os=mac`,
+      command: d.launcherCurlCommand ?? "",
+      download: d.launcherCommandUrl ? backendUrl(d.launcherCommandUrl) : "",
     },
   });
 }
