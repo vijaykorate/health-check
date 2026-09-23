@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { SessionView } from "@/lib/types";
 import { CATEGORIES, categoryPhase } from "@/lib/categories";
@@ -11,7 +11,22 @@ import { SignOutButton } from "@/components/SignOutButton";
 import { VisitWizard } from "@/components/VisitWizard";
 import { BrandMark } from "@/components/Brand";
 
-const POLL_MS = 1500;
+// One polling loop per /check page. Cadence is deliberately slow: a live scan
+// only needs a low-frequency refresh to animate progress, and everything else
+// (waiting on customer consent, launch, connect) changes even less often.
+const POLL_ACTIVE_MS = 3000; // scan actively streaming progress
+const POLL_WAIT_MS = 5000; // waiting on consent / launch / connect (percent 0)
+const POLL_HIDDEN_MS = 5000; // tab hidden: back off, just re-check visibility
+
+// Session-level terminal states: once reached, the row will not change via
+// polling, so we stop. A technician "cancel" sets the backend STATUS to
+// 'failed', so cancelled is covered here. ('expired'/'rejected' are consent
+// states, not session statuses — SessionStatus is running|scanned|completed|failed.)
+const TERMINAL_STATUSES: ReadonlySet<string> = new Set([
+  "scanned",
+  "completed",
+  "failed",
+]);
 
 const PHASE_STYLES: Record<string, string> = {
   queued: "opacity-50",
@@ -28,19 +43,37 @@ const PHASE_LABEL: Record<string, string> = {
 export function CheckClient({ id }: { id: string }) {
   const [view, setView] = useState<SessionView | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
-  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    let active = true;
+    // Each mount owns its own loop state. `cancelled` is this run's liveness flag,
+    // `timeoutId` is the single pending timer this run scheduled, and `inFlight`
+    // guarantees we never issue two identical requests concurrently. Because the
+    // next tick is scheduled ONLY after the current fetch resolves (recursive
+    // setTimeout, not setInterval), there is exactly one request in flight and one
+    // timer pending at any moment — one polling loop per page.
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let inFlight = false;
 
-    async function poll() {
-      if (!active) return;
-      // Pause polling while the tab is hidden; re-check shortly after.
+    const schedule = (ms: number) => {
+      if (cancelled) return;
+      timeoutId = setTimeout(tick, ms);
+    };
+
+    async function tick() {
+      if (cancelled) return;
+      // Pause while the tab is hidden — just re-check visibility later, no request.
       if (typeof document !== "undefined" && document.hidden) {
-        timer.current = setTimeout(poll, 3000);
+        schedule(POLL_HIDDEN_MS);
         return;
       }
-      let nextDelay = 6000; // slow cadence while waiting (consent/launch/idle)
+      // Never overlap: if a request is somehow still running, defer instead of
+      // firing a second identical one.
+      if (inFlight) {
+        schedule(POLL_ACTIVE_MS);
+        return;
+      }
+      inFlight = true;
       try {
         const res = await fetch(`/api/diagnostics/${id}`, { cache: "no-store" });
         if (!res.ok) {
@@ -48,24 +81,26 @@ export function CheckClient({ id }: { id: string }) {
           throw new Error(`Poll failed (${res.status})`);
         }
         const data = (await res.json()) as SessionView;
-        if (!active) return;
+        if (cancelled) return;
         setView(data);
-        // Terminal states: stop polling entirely.
-        if (data.status === "scanned" || data.status === "completed" || data.status === "failed") return;
-        // Fast cadence ONLY while a scan is actively streaming progress; otherwise slow.
-        nextDelay = data.status === "running" && data.percent > 0 ? POLL_MS : 6000;
+        // Terminal session state: stop polling entirely (no reschedule).
+        if (TERMINAL_STATUSES.has(data.status)) return;
+        // 3s only while a scan is actively streaming progress; slower otherwise.
+        const active = data.status === "running" && data.percent > 0;
+        schedule(active ? POLL_ACTIVE_MS : POLL_WAIT_MS);
       } catch (e) {
-        if (!active) return;
+        if (cancelled) return;
         setFetchError((e as Error).message);
-        return; // stop on error
+        return; // stop on error (incl. 404) — deps are [id], so no re-arm
+      } finally {
+        inFlight = false;
       }
-      timer.current = setTimeout(poll, nextDelay);
     }
 
-    poll();
+    tick(); // exactly one loop starts here
     return () => {
-      active = false;
-      if (timer.current) clearTimeout(timer.current);
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
     };
   }, [id]);
 

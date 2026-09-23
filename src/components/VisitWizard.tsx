@@ -263,13 +263,18 @@ export function VisitWizard({
   }, [stage, launch, id, scanUnlocked]);
 
   useEffect(() => {
-    if (view.status === "running" && view.percent > 0 && (stage === "launch" || stage === "connecting")) {
+    // Defensive consent gate: only advance to the scanning stage once consent
+    // is APPROVED. A reused SESSION_ID can carry stale Mongo progress
+    // (percent > 0) while consent is still PENDING/REJECTED; without this guard
+    // the UI would jump straight to "scanning" ahead of consent. The backend
+    // also blocks progress/complete until APPROVED — this keeps the UI honest.
+    if (scanUnlocked && view.status === "running" && view.percent > 0 && (stage === "launch" || stage === "connecting")) {
       setStage("scanning");
     }
     if (scanDone && (stage === "launch" || stage === "connecting" || stage === "scanning")) {
       setStage("inspection");
     }
-  }, [view.status, view.percent, scanDone, stage]);
+  }, [view.status, view.percent, scanDone, scanUnlocked, stage]);
 
   const checks = view.diagnostic?.Checks ?? [];
   const summary = view.diagnostic?.Summary;
