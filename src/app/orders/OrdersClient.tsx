@@ -92,7 +92,13 @@ export function OrdersClient({ technicianName }: { technicianName: string }) {
       }
     };
     load();
-    const t = setInterval(load, 3000); // reflect in-progress/completed live
+    // Poll infrequently (was every 3s — a request storm) and skip while the tab
+    // is hidden. The orders list only needs to reflect in-progress/completed
+    // occasionally, so 20s + visibility-pause is plenty and stops hammering the API.
+    const t = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      load();
+    }, 20000);
     return () => {
       active = false;
       clearInterval(t);

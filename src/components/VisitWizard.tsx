@@ -166,162 +166,48 @@ function CommandLabel({ children }: { children: ReactNode }) {
   return <span className="text-[11px] font-bold uppercase tracking-wider text-muted">{children}</span>;
 }
 
-// ── Technician Health Check shift OTP (backend-owned) ───────────────────────
-// Reuses the existing Pockit backend OTP (POST /api/hc/otp[/verify], status).
-// A verified shift is what lets the diagnostic script's callbacks pass the
-// backend's requireValidShift gate. No OTP is generated in Next.js.
-function OtpGate({ onVerified }: { onVerified: () => void }) {
-  const [checking, setChecking] = useState(true);
-  const [sent, setSent] = useState(false);
-  const [otp, setOtp] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+// (Removed) Technician Health Check shift-OTP gate ("Verify your shift"): the
+// launch flow no longer requires a technician one-time code. The scan is
+// authorized by the customer connecting + an admin approving consent (Approve/Deny).
 
-  useEffect(() => {
-    let active = true;
-    fetch("/api/hc/otp/status", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : { verified: false }))
-      .then((d) => {
-        if (!active) return;
-        if (d.verified) onVerified();
-        setChecking(false);
-      })
-      .catch(() => active && setChecking(false));
-    return () => {
-      active = false;
-    };
-  }, [onVerified]);
-
-  async function send() {
-    setBusy(true);
-    setError(null);
-    try {
-      const r = await fetch("/api/hc/otp", { method: "POST" });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Could not send code.");
-      setSent(true);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function verify() {
-    setBusy(true);
-    setError(null);
-    try {
-      const r = await fetch("/api/hc/otp/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ otp }),
-      });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Invalid or expired code.");
-      onVerified();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  if (checking) {
-    return <div className="card mt-5 p-6 text-sm text-muted">Checking your Health Check shift…</div>;
-  }
-
-  return (
-    <div className="card mt-5 p-6">
-      <div className="text-[11px] font-bold uppercase tracking-wider text-brand">Step 1 · Verify your shift</div>
-      <h3 className="mt-1 font-display text-lg font-bold text-foreground">Health Check verification code</h3>
-      <p className="mt-1 text-sm text-muted">
-        A one-time code is pushed to your Pockit app. It unlocks Health Check for your whole shift.
-      </p>
-      {!sent ? (
-        <button onClick={send} disabled={busy} className="btn-primary mt-4 px-5 py-2.5 text-sm disabled:opacity-60">
-          {busy ? "Sending…" : "Send verification code"}
-        </button>
-      ) : (
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <input
-            value={otp}
-            onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-            inputMode="numeric"
-            placeholder="6-digit code"
-            className="w-40 rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground"
-          />
-          <button onClick={verify} disabled={busy || otp.length < 4} className="btn-primary px-4 py-2 text-sm disabled:opacity-60">
-            {busy ? "Verifying…" : "Verify"}
-          </button>
-          <button onClick={send} disabled={busy} className="text-sm text-muted hover:text-foreground">
-            Resend
-          </button>
-        </div>
-      )}
-      {error ? <p className="mt-3 text-sm text-bad">{error}</p> : null}
-    </div>
-  );
-}
-
-// ── Customer pairing / consent (backend-owned) ──────────────────────────────
-// Requests the 6-digit pairing code from the backend and shows it for the
-// technician to read to the customer. Connection status comes from the polled
-// session view (Three Frontends, One Session) — no local consent state.
-function PairingPanel({ id, connected }: { id: string; connected: boolean }) {
-  const [code, setCode] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function generate() {
-    if (busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const r = await fetch(`/api/diagnostics/${id}/pairing-code`, { method: "POST" });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.error ?? "Could not generate a code.");
-      setCode(d.code ?? null);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
+// ── Customer consent (read-only status) ─────────────────────────────────────
+// Consent is granted by the CUSTOMER in their own Pockit app (Approve/Decline/
+// Later — see Customer-App healthCheckService, POST /api/hc/consent). This
+// technician screen only REFLECTS the decision; CONSENT_STATUS='APPROVED'
+// unlocks the scan (enforced server-side in scriptProgress/scriptComplete).
+function CustomerConsentPanel({ status }: { status: string | null }) {
+  const approved = status === "APPROVED";
+  const rejected = status === "REJECTED";
   return (
     <div className="card mt-5 p-6">
       <div className="flex items-center gap-2.5">
         <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand/12 text-base">🔒</span>
         <div>
           <div className="font-display font-semibold text-foreground">Customer consent</div>
-          <div className="text-xs text-muted">The customer connects with a 6-digit code — required before the scan.</div>
+          <div className="text-xs text-muted">
+            The customer approves this Health Check in their Pockit app before the scan.
+          </div>
         </div>
         <span className="ml-auto">
-          {connected ? (
-            <span className="rounded-full bg-ok-bg px-3 py-1 text-xs font-semibold text-ok">Connected ✓</span>
-          ) : code ? (
+          {approved ? (
+            <span className="rounded-full bg-ok-bg px-3 py-1 text-xs font-semibold text-ok">Approved ✓</span>
+          ) : rejected ? (
+            <span className="rounded-full bg-bad-bg px-3 py-1 text-xs font-semibold text-bad">Declined</span>
+          ) : (
             <span className="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-xs font-semibold text-muted">
               <span className="h-2 w-2 animate-pulse rounded-full bg-brand" />
               Waiting for customer…
             </span>
-          ) : null}
+          )}
         </span>
       </div>
-
-      {!connected ? (
-        code ? (
-          <div className="mt-4">
-            <div className="text-xs text-muted">Read this code to the customer — they enter it on their device:</div>
-            <div className="mt-2 font-mono text-3xl font-bold tracking-[0.4em] text-foreground">{code}</div>
-            <button onClick={generate} disabled={busy} className="mt-3 text-sm text-muted hover:text-foreground">
-              {busy ? "Generating…" : "Generate a new code"}
-            </button>
-          </div>
-        ) : (
-          <button onClick={generate} disabled={busy} className="btn-primary mt-4 px-4 py-2 text-sm disabled:opacity-60">
-            {busy ? "Generating…" : "Request customer consent"}
-          </button>
-        )
+      {!approved ? (
+        <p className="mt-3 text-sm text-muted">
+          {rejected
+            ? "The customer declined in their Pockit app. Ask them to open Health Check consent and tap Approve to proceed."
+            : "Ask the customer to open the Health Check consent in their Pockit app and tap Approve."}
+        </p>
       ) : null}
-      {error ? <p className="mt-3 text-sm text-bad">{error}</p> : null}
     </div>
   );
 }
@@ -346,7 +232,6 @@ export function VisitWizard({
   } | null>(null);
   const [deliverError, setDeliverError] = useState<string | null>(null);
   const [os, setOs] = useState<"windows" | "mac">("windows");
-  const [otpVerified, setOtpVerified] = useState(false);
 
   const [inspection, setInspection] = useState<Record<string, InspectionStatus>>({});
   const [observations, setObservations] = useState("");
@@ -360,16 +245,13 @@ export function VisitWizard({
 
   const running = view.status === "running";
   const scanDone = view.status === "scanned" || view.status === "completed";
-  // Consent = the customer paired into this single backend session.
-  const consentAccepted = view.customerConnectionStatus === "CONNECTED";
-  // Admin consent gate (backend-enforced in scriptProgress/scriptComplete/submit);
-  // the UI only reflects it. Diagnostics are shown only once an admin approves.
-  const adminApproved = view.consentStatus === "APPROVED";
+  // Consent is a single Approve/Deny decision (customer on-site, or admin in the
+  // CRM). CONSENT_STATUS='APPROVED' is the one gate — backend-enforced in
+  // scriptProgress/scriptComplete/submit; the UI only reflects it. No pairing
+  // code, no shift OTP.
+  const consentApproved = view.consentStatus === "APPROVED";
   const consentRejected = view.consentStatus === "REJECTED";
-  const scanUnlocked = otpVerified && consentAccepted;
-  // Stable callback so OtpGate's status effect doesn't re-run (and re-poll the
-  // backend) on every parent re-render (CheckClient re-renders every ~1.5s).
-  const handleOtpVerified = useCallback(() => setOtpVerified(true), []);
+  const scanUnlocked = consentApproved;
 
   // Fetch the backend-generated launcher commands (relayed by the BFF).
   useEffect(() => {
@@ -504,48 +386,21 @@ export function VisitWizard({
             Run the health check on this machine
           </h2>
           <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted">
-            Verify your shift, connect the customer, then run the diagnostic on the machine being
-            serviced. Results stream back to Pockit automatically.
+            Connect the customer and get admin approval, then run the diagnostic on the machine
+            being serviced. Results stream back to Pockit automatically.
           </p>
 
-          {!otpVerified ? (
-            <OtpGate onVerified={handleOtpVerified} />
-          ) : (
-            <>
-              <PairingPanel id={id} connected={consentAccepted} />
+          <>
+              <CustomerConsentPanel status={view.consentStatus ?? null} />
 
-              {consentAccepted && !adminApproved ? (
-                <div
-                  className={`mt-5 rounded-2xl border p-5 text-sm ${
-                    consentRejected
-                      ? "border-red-300 bg-red-50 text-red-700"
-                      : "border-amber-300 bg-amber-50 text-amber-800"
-                  }`}
-                >
-                  {consentRejected ? (
-                    <>
-                      <p className="font-semibold">Consent rejected by admin</p>
-                      {view.consentRejectReason ? (
-                        <p className="mt-1">Reason: {view.consentRejectReason}</p>
-                      ) : null}
-                      <p className="mt-1">
-                        This Health Check cannot proceed. Reconnect the customer to raise a new
-                        request for approval.
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <p className="font-semibold">Waiting for admin approval</p>
-                      <p className="mt-1">
-                        The customer is connected. An admin must approve this Health Check before the
-                        diagnostic can run.
-                      </p>
-                    </>
-                  )}
+              {consentRejected && view.consentRejectReason ? (
+                <div className="mt-5 rounded-2xl border border-red-300 bg-red-50 p-4 text-sm text-red-700">
+                  <p className="font-semibold">Consent declined</p>
+                  <p className="mt-1">Reason: {view.consentRejectReason}</p>
                 </div>
               ) : null}
 
-              {consentAccepted && adminApproved ? (
+              {consentApproved ? (
                 <>
                   <div className="mt-5 inline-flex rounded-xl border border-border bg-surface-2/60 p-1 shadow-inner">
                     {(["windows", "mac"] as const).map((o) => (
@@ -619,8 +474,7 @@ export function VisitWizard({
                   </p>
                 </div>
               )}
-            </>
-          )}
+          </>
 
           <div className="mt-6">
             <button

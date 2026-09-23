@@ -34,6 +34,13 @@ export function CheckClient({ id }: { id: string }) {
     let active = true;
 
     async function poll() {
+      if (!active) return;
+      // Pause polling while the tab is hidden; re-check shortly after.
+      if (typeof document !== "undefined" && document.hidden) {
+        timer.current = setTimeout(poll, 3000);
+        return;
+      }
+      let nextDelay = 6000; // slow cadence while waiting (consent/launch/idle)
       try {
         const res = await fetch(`/api/diagnostics/${id}`, { cache: "no-store" });
         if (!res.ok) {
@@ -43,21 +50,22 @@ export function CheckClient({ id }: { id: string }) {
         const data = (await res.json()) as SessionView;
         if (!active) return;
         setView(data);
-        if (data.status === "scanned" || data.status === "completed" || data.status === "failed") {
-          if (timer.current) clearInterval(timer.current);
-        }
+        // Terminal states: stop polling entirely.
+        if (data.status === "scanned" || data.status === "completed" || data.status === "failed") return;
+        // Fast cadence ONLY while a scan is actively streaming progress; otherwise slow.
+        nextDelay = data.status === "running" && data.percent > 0 ? POLL_MS : 6000;
       } catch (e) {
         if (!active) return;
         setFetchError((e as Error).message);
-        if (timer.current) clearInterval(timer.current);
+        return; // stop on error
       }
+      timer.current = setTimeout(poll, nextDelay);
     }
 
     poll();
-    timer.current = setInterval(poll, POLL_MS);
     return () => {
       active = false;
-      if (timer.current) clearInterval(timer.current);
+      if (timer.current) clearTimeout(timer.current);
     };
   }, [id]);
 
