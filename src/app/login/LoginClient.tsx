@@ -59,7 +59,12 @@ export function LoginClient() {
         // Don't surface the backend OTP rate-limit as an error — it's expected
         // when a code was just requested. Show a calm muted note instead.
         if (/too many otp|try again after|rate limit/i.test(msg)) {
-          setNotice("A code was just sent. Please wait a moment, then tap Login again.");
+          // A code was NOT sent (rate-limited). Show the backend's wait time in a
+          // calm note, and don't claim a code went out.
+          setNotice(
+            msg.replace(/^too many otp requests\.?\s*/i, "") ||
+              "Please wait a moment before requesting another code.",
+          );
         } else {
           setError(msg);
         }
