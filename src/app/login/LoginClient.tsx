@@ -12,6 +12,9 @@ export function LoginClient() {
   const [agreed, setAgreed] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // OTP rate-limit is expected friction, not a failure — shown as a calm muted
+  // note instead of a red error.
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   // If a live session already exists, don't show the login form — send the
@@ -43,6 +46,7 @@ export function LoginClient() {
     if (busy || !mobile.trim() || !agreed) return;
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       const res = await fetch("/api/auth/request-otp", {
         method: "POST",
@@ -51,7 +55,14 @@ export function LoginClient() {
       });
       if (!res.ok) {
         const d = (await res.json().catch(() => ({}))) as { error?: string };
-        setError(d.error ?? "Could not send code. Try again.");
+        const msg = d.error ?? "Could not send code. Try again.";
+        // Don't surface the backend OTP rate-limit as an error — it's expected
+        // when a code was just requested. Show a calm muted note instead.
+        if (/too many otp|try again after|rate limit/i.test(msg)) {
+          setNotice("A code was just sent. Please wait a moment, then tap Login again.");
+        } else {
+          setError(msg);
+        }
         return;
       }
       setStage("code");
@@ -151,6 +162,9 @@ export function LoginClient() {
             </label>
 
             {error ? <p className="mt-3 text-sm text-bad">{error}</p> : null}
+            {notice ? (
+              <p className="mt-3 rounded-lg bg-surface-2 px-3 py-2 text-sm text-muted">{notice}</p>
+            ) : null}
 
             <button
               type="submit"
@@ -177,6 +191,7 @@ export function LoginClient() {
                   setStage("mobile");
                   setCode("");
                   setError(null);
+                  setNotice(null);
                 }}
                 className="text-xs font-semibold text-brand hover:underline"
               >
