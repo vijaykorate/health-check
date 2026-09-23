@@ -24,7 +24,9 @@ export async function GET(
   // $p (temp path) is concatenated into the ArgumentList so it expands in the
   // running shell; -BackendUrl points the script's progress posts at the backend.
   const pockitArgs = `'-NoProfile -ExecutionPolicy "Bypass" -File ' + $p + ' -SessionId "${id}" -BackendUrl "${backend}"'`;
-  const dlPrefix = `$p = "$env:TEMP\\Pockit-PC-Diagnostic-V1.0.ps1"; Invoke-WebRequest -Uri '${scriptUrl}' -OutFile $p -UseBasicParsing; $pockitArgs = ${pockitArgs};`;
+  // Unblock-File strips the Mark-of-the-Web so Windows Smart App Control / SmartScreen
+  // don't block the fetched agent (the pasted command itself isn't a downloaded file).
+  const dlPrefix = `$p = "$env:TEMP\\Pockit-PC-Diagnostic-V1.0.ps1"; Invoke-WebRequest -Uri '${scriptUrl}' -OutFile $p -UseBasicParsing; Unblock-File -Path $p; $pockitArgs = ${pockitArgs};`;
   const standard = `${dlPrefix} Start-Process powershell.exe -WindowStyle Minimized -ArgumentList $pockitArgs`;
   const elevated = `${dlPrefix} try { Start-Process powershell.exe -Verb RunAs -WindowStyle Minimized -ArgumentList $pockitArgs -ErrorAction Stop } catch { Start-Process powershell.exe -WindowStyle Minimized -ArgumentList $pockitArgs }`;
 

@@ -25,7 +25,7 @@ export async function GET(
     "setlocal",
     `set "PS1=%TEMP%\\Pockit-PC-Diagnostic-V1.0.ps1"`,
     "echo Downloading Pockit diagnostic agent...",
-    `powershell.exe -NoProfile -Command "try { Invoke-WebRequest -Uri '${scriptUrl}' -OutFile '%PS1%' -UseBasicParsing } catch { exit 1 }"`,
+    `powershell.exe -NoProfile -Command "try { Invoke-WebRequest -Uri '${scriptUrl}' -OutFile '%PS1%' -UseBasicParsing; Unblock-File -Path '%PS1%' } catch { exit 1 }"`,
     "if errorlevel 1 (",
     "  echo Could not download the diagnostic agent. Check your network connection and try again.",
     "  pause",
