@@ -170,15 +170,34 @@ function CommandLabel({ children }: { children: ReactNode }) {
 // launch flow no longer requires a technician one-time code. The scan is
 // authorized by the customer connecting + an admin approving consent (Approve/Deny).
 
-// ── Customer consent (display-only) ──────────────────────────────────────────
-// Starting the Health Check IS the consent request (createSession sets
-// CONSENT_STATUS='PENDING'); the customer Approves/Declines/Later in their OWN
-// Pockit app. This screen only REFLECTS the decision — CONSENT_STATUS='APPROVED'
-// unlocks the scan (enforced server-side). There is exactly ONE request, raised
-// on start; the technician never approves or re-sends here.
-function CustomerConsentPanel({ status }: { status: string | null }) {
+// ── Customer consent (technician sends the request) ──────────────────────────
+// The technician taps "Send consent to customer" — the ONLY thing that raises the
+// request: POST /api/diagnostics/:id/request-consent sets CONSENT_STATUS='PENDING'
+// and notifies the customer, who Approves/Declines/Later in their OWN Pockit app.
+// The HC no longer auto-requests on start, so this is the single request.
+// CONSENT_STATUS='APPROVED' unlocks the scan (enforced server-side).
+function CustomerConsentPanel({ id, status }: { id: string; status: string | null }) {
   const approved = status === "APPROVED";
   const rejected = status === "REJECTED";
+  const pending = status === "PENDING";
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function sendConsent() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await fetch(`/api/diagnostics/${id}/request-consent`, { method: "POST" });
+      const d = (await r.json().catch(() => ({}))) as { error?: string };
+      if (!r.ok) throw new Error(d.error ?? "Could not send the consent request.");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="card mt-5 p-6">
       <div className="flex items-center gap-2.5">
@@ -186,7 +205,7 @@ function CustomerConsentPanel({ status }: { status: string | null }) {
         <div>
           <div className="font-display font-semibold text-foreground">Customer consent</div>
           <div className="text-xs text-muted">
-            The customer approves this Health Check in their Pockit app before the scan.
+            Send the request; the customer approves in their Pockit app before the scan.
           </div>
         </div>
         <span className="ml-auto">
@@ -194,20 +213,34 @@ function CustomerConsentPanel({ status }: { status: string | null }) {
             <span className="rounded-full bg-ok-bg px-3 py-1 text-xs font-semibold text-ok">Approved ✓</span>
           ) : rejected ? (
             <span className="rounded-full bg-bad-bg px-3 py-1 text-xs font-semibold text-bad">Declined</span>
-          ) : (
+          ) : pending ? (
             <span className="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-xs font-semibold text-muted">
               <span className="h-2 w-2 animate-pulse rounded-full bg-brand" />
               Waiting for customer…
             </span>
-          )}
+          ) : null}
         </span>
       </div>
       {!approved ? (
-        <p className="mt-3 text-sm text-muted">
-          {rejected
-            ? "The customer declined in their Pockit app. Ask them to open the Health Check consent and tap Approve to proceed."
-            : "Ask the customer to open the Health Check consent in their Pockit app and tap Approve."}
-        </p>
+        <div className="mt-4">
+          <button
+            onClick={sendConsent}
+            disabled={busy}
+            className="btn-primary px-4 py-2 text-sm disabled:opacity-60"
+          >
+            {busy ? "Sending…" : pending || rejected ? "Resend consent request" : "Send consent to customer"}
+          </button>
+          {pending ? (
+            <p className="mt-3 text-sm text-muted">
+              Sent — waiting for the customer to Approve or Decline in their Pockit app.
+            </p>
+          ) : rejected ? (
+            <p className="mt-3 text-sm text-muted">
+              The customer declined. Tap &ldquo;Resend consent request&rdquo; to ask again.
+            </p>
+          ) : null}
+          {error ? <p className="mt-3 text-sm text-bad">{error}</p> : null}
+        </div>
       ) : null}
     </div>
   );
@@ -412,7 +445,7 @@ export function VisitWizard({
           </p>
 
           <>
-              <CustomerConsentPanel status={view.consentStatus ?? null} />
+              <CustomerConsentPanel id={id} status={view.consentStatus ?? null} />
 
               {consentRejected && view.consentRejectReason ? (
                 <div className="mt-5 rounded-2xl border border-red-300 bg-red-50 p-4 text-sm text-red-700">
