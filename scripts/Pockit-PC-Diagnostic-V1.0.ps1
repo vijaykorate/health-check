@@ -23,7 +23,7 @@ function Progress($percent,$stage,$message){
  try{
   $liveFindings.Add([PSCustomObject]@{At=(Get-Date).ToString("o");Stage=$stage;Text=$message})
   $body=[ordered]@{Percent=$percent;Stage=$stage;Message=$message;Findings=@($liveFindings.ToArray())}|ConvertTo-Json -Depth 10
-  Invoke-RestMethod -Uri "$BackendUrl/api/sessions/$SessionId/progress" -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) -ErrorAction Stop -TimeoutSec 5 | Out-Null
+  Invoke-RestMethod -Uri "$BackendUrl/api/sessions/$SessionId/progress" -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) -ErrorAction Stop -TimeoutSec 12 | Out-Null
  }catch{ Log "Progress POST failed: $($_.Exception.Message)" }
 }
 
@@ -134,6 +134,10 @@ function Run-StressTest($DurationSeconds=120){
 }
 
 Log "Scan started for session $SessionId (backend $BackendUrl)"
+# Post immediately so the technician's ring shows life within a second of launch,
+# before the first WMI queries run. Early posts also now use a longer timeout so
+# they survive a cold/slow backend connection instead of silently dropping.
+Progress 1 "starting" "Diagnostic agent starting on this PC."
 Progress 4 "connecting" "Diagnostic agent connected to this PC."
 
 $cs=Safe "ComputerSystem" {Get-CimInstance Win32_ComputerSystem|Select -First 1}
@@ -178,7 +182,7 @@ Progress 8 "system" "$($cs.Manufacturer) $($cs.Model) - $($os.Caption)"
 
 Log "[1/7] Performance"
 $cpuS=@();$memS=@()
-1..10|%{$p=Safe "CPU sample" {(Get-CimInstance Win32_Processor|Measure LoadPercentage -Average).Average};$m=Safe "RAM sample" {Get-CimInstance Win32_OperatingSystem};if($null-ne$p){$cpuS+=[double]$p};if($m-and$m.TotalVisibleMemorySize){$memS+=(1-($m.FreePhysicalMemory/$m.TotalVisibleMemorySize))*100};if($_-lt10){Start-Sleep 1}}
+1..10|%{$p=Safe "CPU sample" {(Get-CimInstance Win32_Processor|Measure LoadPercentage -Average).Average};$m=Safe "RAM sample" {Get-CimInstance Win32_OperatingSystem};if($null-ne$p){$cpuS+=[double]$p};if($m-and$m.TotalVisibleMemorySize){$memS+=(1-($m.FreePhysicalMemory/$m.TotalVisibleMemorySize))*100};if($_-eq3-or$_-eq6){Progress (8+$_) "performance" "Sampling CPU & memory ($_/10)…"};if($_-lt10){Start-Sleep 1}}
 $cpuAvg=if($cpuS){[math]::Round(($cpuS|Measure -Average).Average,1)}else{$null};$cpuMax=if($cpuS){[math]::Round(($cpuS|Measure -Maximum).Maximum,1)}else{$null}
 $memAvg=if($memS){[math]::Round(($memS|Measure -Average).Average,1)}else{$null};$memMax=if($memS){[math]::Round(($memS|Measure -Maximum).Maximum,1)}else{$null}
 $perf="Good";if(($cpuMax-ge95)-or($memMax-ge95)){$perf="Attention"}elseif(($cpuAvg-ge80)-or($memAvg-ge85)){$perf="Watch"}

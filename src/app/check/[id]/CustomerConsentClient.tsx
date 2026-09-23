@@ -21,17 +21,27 @@ export function CustomerConsentClient({
   token: string;
 }) {
   const [decision, setDecision] = useState<"accepted" | "declined" | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
+    // Load the current decision BEFORE showing any action buttons. Without this
+    // gate the page renders Approve/Decline while the fetch is in flight, then
+    // flips to "Approved" — which reads to the customer as a second consent
+    // request. Gating on `loaded` means an already-decided order shows its
+    // status directly (Loading → Approved), never the buttons.
     fetch(`/api/m/${encodeURIComponent(orderId)}`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((d: HcStatus | null) => {
-        if (active && d) setDecision(d.consentDecision ?? null);
+        if (!active) return;
+        if (d) setDecision(d.consentDecision ?? null);
+        setLoaded(true);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (active) setLoaded(true);
+      });
     return () => {
       active = false;
     };
@@ -69,7 +79,12 @@ export function CustomerConsentClient({
           hardware &amp; software only — no files or personal data are accessed.
         </p>
 
-        {decision === "accepted" ? (
+        {!loaded ? (
+          <div className="mt-6 flex items-center gap-3 rounded-xl bg-surface p-4 text-sm text-muted">
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-brand/30 border-t-brand" />
+            Loading…
+          </div>
+        ) : decision === "accepted" ? (
           <div className="mt-6 rounded-xl bg-ok-bg p-4 text-sm font-semibold text-ok">
             ✓ Approved — thank you. Your technician can now run the Health Check.
           </div>
