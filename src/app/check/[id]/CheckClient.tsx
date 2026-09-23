@@ -15,7 +15,7 @@ import { BrandMark } from "@/components/Brand";
 // only needs a low-frequency refresh to animate progress, and everything else
 // (waiting on customer consent, launch, connect) changes even less often.
 const POLL_ACTIVE_MS = 3000; // scan actively streaming progress
-const POLL_WAIT_MS = 2500; // waiting on consent / launch / connect (percent 0) — snappier so the tech screen detects the customer's approval + scan start quickly
+const POLL_WAIT_MS = 2000; // waiting on consent / launch / connect (percent 0) — snappy so the tech screen detects the customer's approval + scan start quickly
 const POLL_HIDDEN_MS = 5000; // tab hidden: back off, just re-check visibility
 
 // Session-level terminal states: once reached, the row will not change via

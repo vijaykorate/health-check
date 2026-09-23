@@ -170,35 +170,15 @@ function CommandLabel({ children }: { children: ReactNode }) {
 // launch flow no longer requires a technician one-time code. The scan is
 // authorized by the customer connecting + an admin approving consent (Approve/Deny).
 
-// ── Customer consent (Approve/Deny/Later) ────────────────────────────────────
-// The technician taps "Send consent to customer" to raise the request; the
-// backend sets CONSENT_STATUS='PENDING' and notifies the customer, who then
-// Approves / Declines / Later in their OWN Pockit app. CONSENT_STATUS='APPROVED'
-// unlocks the scan (enforced server-side in scriptProgress/scriptComplete). The
-// technician never approves consent here — they only send the request.
-function CustomerConsentPanel({ id, status }: { id: string; status: string | null }) {
+// ── Customer consent (display-only) ──────────────────────────────────────────
+// Starting the Health Check IS the consent request (createSession sets
+// CONSENT_STATUS='PENDING'); the customer Approves/Declines/Later in their OWN
+// Pockit app. This screen only REFLECTS the decision — CONSENT_STATUS='APPROVED'
+// unlocks the scan (enforced server-side). There is exactly ONE request, raised
+// on start; the technician never approves or re-sends here.
+function CustomerConsentPanel({ status }: { status: string | null }) {
   const approved = status === "APPROVED";
   const rejected = status === "REJECTED";
-  const [sent, setSent] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function sendConsent() {
-    if (busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const r = await fetch(`/api/diagnostics/${id}/request-consent`, { method: "POST" });
-      const d = (await r.json().catch(() => ({}))) as { error?: string };
-      if (!r.ok) throw new Error(d.error ?? "Could not send the consent request.");
-      setSent(true);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <div className="card mt-5 p-6">
       <div className="flex items-center gap-2.5">
@@ -206,7 +186,7 @@ function CustomerConsentPanel({ id, status }: { id: string; status: string | nul
         <div>
           <div className="font-display font-semibold text-foreground">Customer consent</div>
           <div className="text-xs text-muted">
-            Send the request; the customer Approves, Declines or defers in their Pockit app before the scan.
+            The customer approves this Health Check in their Pockit app before the scan.
           </div>
         </div>
         <span className="ml-auto">
@@ -214,37 +194,21 @@ function CustomerConsentPanel({ id, status }: { id: string; status: string | nul
             <span className="rounded-full bg-ok-bg px-3 py-1 text-xs font-semibold text-ok">Approved ✓</span>
           ) : rejected ? (
             <span className="rounded-full bg-bad-bg px-3 py-1 text-xs font-semibold text-bad">Declined</span>
-          ) : sent ? (
+          ) : (
             <span className="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-xs font-semibold text-muted">
               <span className="h-2 w-2 animate-pulse rounded-full bg-brand" />
               Waiting for customer…
             </span>
-          ) : null}
+          )}
         </span>
       </div>
-
       {!approved ? (
-        <div className="mt-4">
-          <button
-            onClick={sendConsent}
-            disabled={busy}
-            className="btn-primary px-4 py-2 text-sm disabled:opacity-60"
-          >
-            {busy ? "Sending…" : sent || rejected ? "Resend consent request" : "Send consent to customer"}
-          </button>
-          {sent && !rejected ? (
-            <p className="mt-3 text-sm text-muted">
-              Sent — waiting for the customer to Approve or Decline in their Pockit app.
-            </p>
-          ) : null}
-          {rejected ? (
-            <p className="mt-3 text-sm text-muted">
-              The customer declined. Tap &ldquo;Resend consent request&rdquo; to ask again.
-            </p>
-          ) : null}
-        </div>
+        <p className="mt-3 text-sm text-muted">
+          {rejected
+            ? "The customer declined in their Pockit app. Ask them to open the Health Check consent and tap Approve to proceed."
+            : "Ask the customer to open the Health Check consent in their Pockit app and tap Approve."}
+        </p>
       ) : null}
-      {error ? <p className="mt-3 text-sm text-bad">{error}</p> : null}
     </div>
   );
 }
@@ -305,13 +269,28 @@ export function VisitWizard({
     // (percent > 0) while consent is still PENDING/REJECTED; without this guard
     // the UI would jump straight to "scanning" ahead of consent. The backend
     // also blocks progress/complete until APPROVED — this keeps the UI honest.
-    if (scanUnlocked && view.status === "running" && view.percent > 0 && (stage === "launch" || stage === "connecting")) {
+    // Already reviewed + delivered: show the completion screen and never re-enter
+    // the inspection/review/submit flow — re-submitting a completed session
+    // errors "This session was already reviewed and submitted".
+    if (view.status === "completed") {
+      if (stage !== "done" && stage !== "generating") setStage("done");
+      return;
+    }
+    // Show the live scan the MOMENT it starts — any progress, or a real stage past
+    // "connecting" — so the technician watches the % climb instead of jumping
+    // straight from launch to inspection ("nothing, then suddenly done").
+    const scanLive =
+      view.status === "running" && (view.percent > 0 || (!!view.stage && view.stage !== "connecting"));
+    if (scanUnlocked && scanLive && (stage === "launch" || stage === "connecting")) {
       setStage("scanning");
     }
-    if (scanDone && (stage === "launch" || stage === "connecting" || stage === "scanning")) {
-      setStage("inspection");
+    // Scan finished: if we never showed the scanning ring (fast scan / missed the
+    // window), show it first; otherwise advance to the technician's inspection.
+    if (view.status === "scanned") {
+      if (stage === "launch" || stage === "connecting") setStage("scanning");
+      else if (stage === "scanning") setStage("inspection");
     }
-  }, [view.status, view.percent, scanDone, scanUnlocked, stage]);
+  }, [view.status, view.percent, view.stage, scanUnlocked, stage]);
 
   const checks = view.diagnostic?.Checks ?? [];
   const summary = view.diagnostic?.Summary;
@@ -433,7 +412,7 @@ export function VisitWizard({
           </p>
 
           <>
-              <CustomerConsentPanel id={id} status={view.consentStatus ?? null} />
+              <CustomerConsentPanel status={view.consentStatus ?? null} />
 
               {consentRejected && view.consentRejectReason ? (
                 <div className="mt-5 rounded-2xl border border-red-300 bg-red-50 p-4 text-sm text-red-700">
@@ -841,18 +820,27 @@ export function VisitWizard({
       {/* 7 · Done */}
       {stage === "done" ? (
         <div className="rounded-2xl border border-ok/40 bg-ok-bg p-6 text-ok">
-          <div className="font-display text-lg font-bold">Visit complete</div>
-          <p className="mt-1 text-sm">
-            Health Check report generated for {view.customerName ?? "the customer"}.
-          </p>
-          <ul className="mt-2 space-y-0.5 text-sm">
-            <li>
-              Email to customer: <b>{deliveryLabel(deliverResult?.emailStatus)}</b>
-            </li>
-            <li>
-              WhatsApp to customer: <b>{deliveryLabel(deliverResult?.whatsappStatus)}</b>
-            </li>
-          </ul>
+          <div className="font-display text-lg font-bold">Health Check completed</div>
+          {deliverResult ? (
+            <>
+              <p className="mt-1 text-sm">
+                Health Check report generated for {view.customerName ?? "the customer"}.
+              </p>
+              <ul className="mt-2 space-y-0.5 text-sm">
+                <li>
+                  Email to customer: <b>{deliveryLabel(deliverResult.emailStatus)}</b>
+                </li>
+                <li>
+                  WhatsApp to customer: <b>{deliveryLabel(deliverResult.whatsappStatus)}</b>
+                </li>
+              </ul>
+            </>
+          ) : (
+            <p className="mt-1 text-sm">
+              This Health Check is already completed and the report has been delivered to{" "}
+              {view.customerName ?? "the customer"}. Nothing more to do here.
+            </p>
+          )}
           <div className="mt-4 flex flex-wrap gap-3">
             {deliverResult?.pdfUrl ? (
               <a
