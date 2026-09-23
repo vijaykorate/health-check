@@ -179,18 +179,29 @@ function CommandLabel({ children }: { children: ReactNode }) {
 function CustomerConsentPanel({ id, status }: { id: string; status: string | null }) {
   const approved = status === "APPROVED";
   const rejected = status === "REJECTED";
-  const pending = status === "PENDING";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Did the technician send in THIS view? Drives "Send" → "Resend" and the
+  // "waiting" state — so it always starts as "Send" until they tap it.
+  const [hasSent, setHasSent] = useState(false);
+  // 10-second cooldown between sends so the customer isn't spammed.
+  const [cooldown, setCooldown] = useState(0);
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
 
   async function sendConsent() {
-    if (busy) return;
+    if (busy || cooldown > 0) return;
     setBusy(true);
     setError(null);
     try {
       const r = await fetch(`/api/diagnostics/${id}/request-consent`, { method: "POST" });
       const d = (await r.json().catch(() => ({}))) as { error?: string };
       if (!r.ok) throw new Error(d.error ?? "Could not send the consent request.");
+      setHasSent(true);
+      setCooldown(10);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -213,7 +224,7 @@ function CustomerConsentPanel({ id, status }: { id: string; status: string | nul
             <span className="rounded-full bg-ok-bg px-3 py-1 text-xs font-semibold text-ok">Approved ✓</span>
           ) : rejected ? (
             <span className="rounded-full bg-bad-bg px-3 py-1 text-xs font-semibold text-bad">Declined</span>
-          ) : pending ? (
+          ) : hasSent ? (
             <span className="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-xs font-semibold text-muted">
               <span className="h-2 w-2 animate-pulse rounded-full bg-brand" />
               Waiting for customer…
@@ -225,12 +236,18 @@ function CustomerConsentPanel({ id, status }: { id: string; status: string | nul
         <div className="mt-4">
           <button
             onClick={sendConsent}
-            disabled={busy}
+            disabled={busy || cooldown > 0}
             className="btn-primary px-4 py-2 text-sm disabled:opacity-60"
           >
-            {busy ? "Sending…" : pending || rejected ? "Resend consent request" : "Send consent to customer"}
+            {cooldown > 0
+              ? `Resend in ${cooldown}s`
+              : busy
+                ? "Sending…"
+                : hasSent
+                  ? "Resend consent request"
+                  : "Send consent to customer"}
           </button>
-          {pending ? (
+          {hasSent && !rejected ? (
             <p className="mt-3 text-sm text-muted">
               Sent — waiting for the customer to Approve or Decline in their Pockit app.
             </p>
