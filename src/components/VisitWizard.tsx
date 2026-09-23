@@ -170,14 +170,35 @@ function CommandLabel({ children }: { children: ReactNode }) {
 // launch flow no longer requires a technician one-time code. The scan is
 // authorized by the customer connecting + an admin approving consent (Approve/Deny).
 
-// ── Customer consent (read-only status) ─────────────────────────────────────
-// Consent is granted by the CUSTOMER in their own Pockit app (Approve/Decline/
-// Later — see Customer-App healthCheckService, POST /api/hc/consent). This
-// technician screen only REFLECTS the decision; CONSENT_STATUS='APPROVED'
-// unlocks the scan (enforced server-side in scriptProgress/scriptComplete).
-function CustomerConsentPanel({ status }: { status: string | null }) {
+// ── Customer consent (Approve/Deny/Later) ────────────────────────────────────
+// The technician taps "Send consent to customer" to raise the request; the
+// backend sets CONSENT_STATUS='PENDING' and notifies the customer, who then
+// Approves / Declines / Later in their OWN Pockit app. CONSENT_STATUS='APPROVED'
+// unlocks the scan (enforced server-side in scriptProgress/scriptComplete). The
+// technician never approves consent here — they only send the request.
+function CustomerConsentPanel({ id, status }: { id: string; status: string | null }) {
   const approved = status === "APPROVED";
   const rejected = status === "REJECTED";
+  const [sent, setSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function sendConsent() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await fetch(`/api/diagnostics/${id}/request-consent`, { method: "POST" });
+      const d = (await r.json().catch(() => ({}))) as { error?: string };
+      if (!r.ok) throw new Error(d.error ?? "Could not send the consent request.");
+      setSent(true);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="card mt-5 p-6">
       <div className="flex items-center gap-2.5">
@@ -185,7 +206,7 @@ function CustomerConsentPanel({ status }: { status: string | null }) {
         <div>
           <div className="font-display font-semibold text-foreground">Customer consent</div>
           <div className="text-xs text-muted">
-            The customer approves this Health Check in their Pockit app before the scan.
+            Send the request; the customer Approves, Declines or defers in their Pockit app before the scan.
           </div>
         </div>
         <span className="ml-auto">
@@ -193,21 +214,37 @@ function CustomerConsentPanel({ status }: { status: string | null }) {
             <span className="rounded-full bg-ok-bg px-3 py-1 text-xs font-semibold text-ok">Approved ✓</span>
           ) : rejected ? (
             <span className="rounded-full bg-bad-bg px-3 py-1 text-xs font-semibold text-bad">Declined</span>
-          ) : (
+          ) : sent ? (
             <span className="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-xs font-semibold text-muted">
               <span className="h-2 w-2 animate-pulse rounded-full bg-brand" />
               Waiting for customer…
             </span>
-          )}
+          ) : null}
         </span>
       </div>
+
       {!approved ? (
-        <p className="mt-3 text-sm text-muted">
-          {rejected
-            ? "The customer declined in their Pockit app. Ask them to open Health Check consent and tap Approve to proceed."
-            : "Ask the customer to open the Health Check consent in their Pockit app and tap Approve."}
-        </p>
+        <div className="mt-4">
+          <button
+            onClick={sendConsent}
+            disabled={busy}
+            className="btn-primary px-4 py-2 text-sm disabled:opacity-60"
+          >
+            {busy ? "Sending…" : sent || rejected ? "Resend consent request" : "Send consent to customer"}
+          </button>
+          {sent && !rejected ? (
+            <p className="mt-3 text-sm text-muted">
+              Sent — waiting for the customer to Approve or Decline in their Pockit app.
+            </p>
+          ) : null}
+          {rejected ? (
+            <p className="mt-3 text-sm text-muted">
+              The customer declined. Tap &ldquo;Resend consent request&rdquo; to ask again.
+            </p>
+          ) : null}
+        </div>
       ) : null}
+      {error ? <p className="mt-3 text-sm text-bad">{error}</p> : null}
     </div>
   );
 }
@@ -396,7 +433,7 @@ export function VisitWizard({
           </p>
 
           <>
-              <CustomerConsentPanel status={view.consentStatus ?? null} />
+              <CustomerConsentPanel id={id} status={view.consentStatus ?? null} />
 
               {consentRejected && view.consentRejectReason ? (
                 <div className="mt-5 rounded-2xl border border-red-300 bg-red-50 p-4 text-sm text-red-700">
@@ -457,7 +494,7 @@ export function VisitWizard({
                           href={os === "windows" ? launch.windows.download : launch.mac.download}
                           className="inline-flex w-fit items-center gap-2 rounded-xl border border-brand/50 px-4 py-2 text-sm font-semibold text-brand transition-colors hover:bg-brand/10"
                         >
-                          {os === "windows" ? "Download .ps1 & run instead" : "Download .sh & run instead"}
+                          {os === "windows" ? "Download & run (double-click)" : "Download .sh & run instead"}
                         </a>
                       </div>
                     </div>
@@ -475,7 +512,7 @@ export function VisitWizard({
                 <div className="mt-5 card p-6">
                   <div className="font-display font-semibold text-foreground">Waiting for customer consent</div>
                   <p className="mt-1 text-sm text-muted">
-                    The scan commands appear here once the customer connects with the code above.
+                    The scan commands appear here once the customer approves in their Pockit app.
                   </p>
                 </div>
               )}
