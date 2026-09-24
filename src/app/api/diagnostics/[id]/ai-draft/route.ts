@@ -1,18 +1,13 @@
-// POST /api/diagnostics/[id]/ai-draft — BFF proxy to backend
-// `POST /api/diagnostics/:id/draft-suggestion` (wizard.postDraftSuggestion).
-// The backend owns the AI draft + own-data retrieval; Next.js calls no AI
-// provider directly. Adapts the backend response to the panel's shape.
 import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/session-auth";
 import { hcBackend } from "@/lib/pockit-hc";
+import { loadBackendDetail } from "@/lib/hc-detail";
+import { draftDiagnosis, searchKnowledgeBase, isConfigured } from "@/lib/hc-ai";
+import type { DiagnosticReport } from "@/lib/types";
 
 interface BackendDraft {
   available?: boolean;
-  finding?: string | null;
-  diagnosis?: string | null;
-  recommendation?: string | null;
   similarCases?: unknown[];
-  webKnowledge?: { summary?: string; sources?: unknown[] } | null;
 }
 
 export async function POST(
@@ -24,24 +19,50 @@ export async function POST(
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
-  const r = await hcBackend<BackendDraft>(
+
+  const detailPromise = loadBackendDetail(id, me.pockitToken);
+  const similarPromise = hcBackend<BackendDraft>(
     `api/diagnostics/${encodeURIComponent(id)}/draft-suggestion`,
     { method: "POST", token: me.pockitToken },
   );
-  if (!r.ok) {
+
+  const detailR = await detailPromise;
+  if (!detailR.ok) {
     return NextResponse.json(
-      { error: r.message ?? "Failed to draft." },
-      { status: r.status >= 400 ? r.status : 500 },
+      { error: detailR.message ?? "Session not found." },
+      { status: detailR.status >= 400 ? detailR.status : 404 },
     );
   }
-  const d = r.data;
-  const wk = d.webKnowledge;
+
+  const d = detailR.data;
+  const diagnostic =
+    d.diagnostic && Object.keys(d.diagnostic).length > 0
+      ? (d.diagnostic as DiagnosticReport)
+      : null;
+  const manufacturer = diagnostic?.Machine?.Manufacturer ?? d.manufacturer ?? null;
+  const model = diagnostic?.Machine?.Model ?? d.model ?? null;
+  const rawCategory = diagnostic?.Complaint?.Category ?? null;
+  const category = rawCategory && rawCategory !== "None" ? rawCategory : null;
+  const problem = d.problem ?? diagnostic?.Complaint?.Description ?? null;
+  const checks = diagnostic?.Checks ?? [];
+  const inspection = d.inspection ?? {};
+
+  const [draft, external, similarR] = await Promise.all([
+    draftDiagnosis({ problem, checks, inspection }),
+    searchKnowledgeBase({ manufacturer, model, category, problem }),
+    similarPromise,
+  ]);
+
+  const similarCases = Array.isArray(similarR.data?.similarCases)
+    ? similarR.data.similarCases
+    : [];
+
   return NextResponse.json({
-    finding: typeof d.finding === "string" ? d.finding : null,
-    diagnosis: typeof d.diagnosis === "string" ? d.diagnosis : null,
-    recommendation: typeof d.recommendation === "string" ? d.recommendation : null,
-    similarCases: Array.isArray(d.similarCases) ? d.similarCases : [],
-    external: wk && wk.summary ? { summary: wk.summary, sources: wk.sources ?? [] } : null,
-    aiConfigured: !!d.available,
+    finding: draft?.finding ?? null,
+    diagnosis: draft?.diagnosis ?? null,
+    recommendation: draft?.recommendation ?? null,
+    similarCases,
+    external,
+    aiConfigured: isConfigured(),
   });
 }

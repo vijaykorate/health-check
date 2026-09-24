@@ -5,37 +5,8 @@
 // doc are the single source of truth.
 import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/session-auth";
-import { hcBackend } from "@/lib/pockit-hc";
+import { loadBackendDetail } from "@/lib/hc-detail";
 import type { DiagnosticReport, Finding, SessionView } from "@/lib/types";
-
-interface BackendDetail {
-  id: string;
-  diagnostic_id: string | null;
-  customer_name: string | null;
-  ticket_number: string | null;
-  problem: string | null;
-  manufacturer: string | null;
-  model: string | null;
-  diagnostic: DiagnosticReport | Record<string, never> | null;
-  inspection: Record<string, "ok" | "issue" | "na"> | null;
-  observations: string | null;
-  primary_finding: string | null;
-  severity: string | null;
-  diagnosis: string | null;
-  recommendation: string | null;
-  progress_percent: number;
-  progress_stage: string | null;
-  progress_message: string | null;
-  findings_json: string;
-  status: SessionView["status"];
-  stalled: boolean;
-  overall_status: SessionView["overallStatus"];
-  scan_error: string | null;
-  customerConnectionStatus?: string | null;
-  customerOnline?: boolean;
-  consentStatus?: string | null;
-  consentRejectReason?: string | null;
-}
 
 export async function GET(
   _request: Request,
@@ -47,9 +18,7 @@ export async function GET(
   }
   const { id } = await ctx.params;
 
-  const r = await hcBackend<BackendDetail>(`api/diagnostics/${encodeURIComponent(id)}`, {
-    token: me.pockitToken,
-  });
+  const r = await loadBackendDetail(id, me.pockitToken);
   if (!r.ok) {
     return NextResponse.json(
       { error: r.message ?? "Session not found." },
