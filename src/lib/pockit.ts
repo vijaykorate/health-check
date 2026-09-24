@@ -109,6 +109,7 @@ export interface PockitJob {
   deviceType: string;
   serviceType: string;
   territory: string;
+  started: boolean;
 }
 
 export interface PockitAuthResult {
@@ -167,16 +168,13 @@ export async function fetchTechnicianJobs(
     const hcRows = json.data.filter((r) =>
       isHealthCheck.test(`${r.SERVICE_NAME ?? ""} ${r.SERVICE_FULL_NAME ?? ""}`),
     );
-    // Only show an order once the technician has actually STARTED the job
-    // (job_card.TRACK_STATUS === 'SJ') — the same precondition createSession
-    // enforces, so every listed order can start a Health Check. Graceful: only
-    // filter when the backend row exposes TRACK_STATUS (otherwise we'd hide
-    // everything if the field name ever changes); orders before job-start drop off.
+    // Return every assigned Health Check order, tagging whether the on-site job
+    // has been STARTED (job_card.TRACK_STATUS === 'SJ'). Not-yet-started orders
+    // surface as "Upcoming"; a scan can only begin once the job is started, which
+    // the backend's createSession still enforces. If the backend never exposes
+    // TRACK_STATUS, treat orders as started (don't gate) — the prior behaviour.
     const exposesTrackStatus = hcRows.some((r) => r.TRACK_STATUS != null);
-    const startedRows = exposesTrackStatus
-      ? hcRows.filter((r) => String(r.TRACK_STATUS).toUpperCase() === "SJ")
-      : hcRows;
-    return startedRows
+    return hcRows
       .map((r) => ({
         orderId: String(r.ORDER_ID ?? r.ORDER_NO ?? r.ORDER_NUMBER ?? ""),
         jobCardNo: String(r.JOB_CARD_NO ?? r.JOB_CARD_NUMBER ?? ""),
@@ -188,6 +186,9 @@ export async function fetchTechnicianJobs(
         deviceType: String(r.DEVICE_TYPE ?? r.CATEGORY_NAME ?? ""),
         serviceType: String(r.SERVICE_NAME ?? r.SERVICE_FULL_NAME ?? ""),
         territory: String(r.TERRITORY_NAME ?? r.TERRITORY ?? ""),
+        started: exposesTrackStatus
+          ? String(r.TRACK_STATUS ?? "").toUpperCase() === "SJ"
+          : true,
       }))
       .filter((j) => j.orderId);
   } catch {

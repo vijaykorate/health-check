@@ -18,6 +18,7 @@ interface OrderRow {
   state: "open" | "in_progress" | "completed" | "failed";
   sessionId: string | null;
   healthScore: number | null;
+  started: boolean;
 }
 
 function OrderCard({ o }: { o: OrderRow }) {
@@ -60,7 +61,9 @@ function OrderCard({ o }: { o: OrderRow }) {
         <span className="text-xs text-muted">{o.serviceType}</span>
         <span className="text-xs font-medium text-brand">
           {o.state === "open"
-            ? "Start →"
+            ? o.started
+              ? "Start →"
+              : "Awaiting job start"
             : o.state === "in_progress"
               ? "Resume →"
               : "View report →"}
@@ -114,8 +117,8 @@ export function OrdersClient({ technicianName }: { technicianName: string }) {
     window.location.href = "/login";
   }
 
-  const open = orders?.filter((o) => o.state === "open") ?? [];
-  const active = orders?.filter((o) => o.state === "in_progress") ?? [];
+  const upcoming = orders?.filter((o) => o.state === "open" || o.state === "failed") ?? [];
+  const ongoing = orders?.filter((o) => o.state === "in_progress") ?? [];
   const done = orders?.filter((o) => o.state === "completed") ?? [];
 
   return (
@@ -157,38 +160,38 @@ export function OrdersClient({ technicianName }: { technicianName: string }) {
         </div>
       ) : (
         <div className="mt-6 flex flex-col gap-6">
-          {active.length > 0 ? (
-            <section className="flex flex-col gap-3">
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">
-                In progress
-              </h2>
-              {active.map((o) => (
-                <OrderCard key={o.orderId} o={o} />
-              ))}
-            </section>
-          ) : null}
-
           <section className="flex flex-col gap-3">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">
-              Open ({open.length})
+              Ongoing ({ongoing.length})
             </h2>
-            {open.length === 0 ? (
-              <p className="text-sm text-muted">All caught up — no open orders.</p>
+            {ongoing.length === 0 ? (
+              <p className="text-sm text-muted">No health checks in progress.</p>
             ) : (
-              open.map((o) => <OrderCard key={o.orderId} o={o} />)
+              ongoing.map((o) => <OrderCard key={o.orderId} o={o} />)
             )}
           </section>
 
-          {done.length > 0 ? (
-            <section className="flex flex-col gap-3">
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">
-                Completed
-              </h2>
-              {done.map((o) => (
-                <OrderCard key={o.orderId} o={o} />
-              ))}
-            </section>
-          ) : null}
+          <section className="flex flex-col gap-3">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">
+              Upcoming ({upcoming.length})
+            </h2>
+            {upcoming.length === 0 ? (
+              <p className="text-sm text-muted">No upcoming orders.</p>
+            ) : (
+              upcoming.map((o) => <OrderCard key={o.orderId} o={o} />)
+            )}
+          </section>
+
+          <section className="flex flex-col gap-3">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">
+              Completed ({done.length})
+            </h2>
+            {done.length === 0 ? (
+              <p className="text-sm text-muted">No completed health checks yet.</p>
+            ) : (
+              done.map((o) => <OrderCard key={o.orderId} o={o} />)
+            )}
+          </section>
         </div>
       )}
     </main>
