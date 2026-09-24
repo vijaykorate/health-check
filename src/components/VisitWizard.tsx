@@ -541,10 +541,12 @@ export function VisitWizard({
                         </a>
                         {os === "windows" ? (
                           <p className="mt-2.5 text-xs text-muted">
-                            If Windows shows <b>&ldquo;Smart App Control blocked a file&rdquo;</b>,
-                            that&rsquo;s the download being blocked. Use the <b>PowerShell command
-                            above</b> instead — paste it into PowerShell and the scan starts without
-                            the block.
+                            Windows may ask you to confirm once, since it&rsquo;s a downloaded file. If
+                            it says <b>&ldquo;Smart App Control blocked a file&rdquo;</b> with no
+                            &ldquo;Run anyway&rdquo;, turn <b>Smart App Control</b> off on that PC
+                            (Settings → Privacy &amp; security → Windows Security → App &amp; browser
+                            control → Smart App Control → Off), or use the <b>PowerShell command
+                            above</b> — it isn&rsquo;t a downloaded file, so it runs regardless.
                           </p>
                         ) : null}
                       </div>
