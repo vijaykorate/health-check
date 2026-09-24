@@ -91,6 +91,9 @@ interface DraftCase {
   outcome?: string | null;
 }
 interface AiDraft {
+  finding: string | null;
+  diagnosis: string | null;
+  recommendation: string | null;
   similarCases: DraftCase[];
   external: { summary: string; sources: unknown[] } | null;
   /** Backend `available` — whether a draft was produced (NOT an AI-config flag). */
@@ -377,7 +380,18 @@ export function VisitWizard({
     setAiLoading(true);
     try {
       const res = await fetch(`/api/diagnostics/${id}/ai-draft`, { method: "POST" });
-      if (res.ok) setAi((await res.json()) as AiDraft);
+      if (res.ok) {
+        const draft = (await res.json()) as AiDraft;
+        setAi(draft);
+        if (draft.finding) {
+          const match = FINDING_OPTIONS.find(
+            (f) => f.toLowerCase() === draft.finding!.trim().toLowerCase(),
+          );
+          if (match) setPrimaryFinding(match);
+        }
+        if (draft.diagnosis) setDiagnosis(draft.diagnosis.trim());
+        if (draft.recommendation) setRecommendation(draft.recommendation.trim());
+      }
     } finally {
       setAiLoading(false);
     }
@@ -525,6 +539,14 @@ export function VisitWizard({
                         >
                           {os === "windows" ? "Download & run (double-click)" : "Download .sh & run instead"}
                         </a>
+                        {os === "windows" ? (
+                          <p className="mt-2.5 text-xs text-muted">
+                            If Windows shows <b>&ldquo;Smart App Control blocked a file&rdquo;</b>,
+                            that&rsquo;s the download being blocked. Use the <b>PowerShell command
+                            above</b> instead — paste it into PowerShell and the scan starts without
+                            the block.
+                          </p>
+                        ) : null}
                       </div>
                     </div>
                   )}

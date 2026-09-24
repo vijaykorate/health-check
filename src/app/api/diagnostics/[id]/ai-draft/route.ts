@@ -8,6 +8,9 @@ import { hcBackend } from "@/lib/pockit-hc";
 
 interface BackendDraft {
   available?: boolean;
+  finding?: string | null;
+  diagnosis?: string | null;
+  recommendation?: string | null;
   similarCases?: unknown[];
   webKnowledge?: { summary?: string; sources?: unknown[] } | null;
 }
@@ -34,6 +37,9 @@ export async function POST(
   const d = r.data;
   const wk = d.webKnowledge;
   return NextResponse.json({
+    finding: typeof d.finding === "string" ? d.finding : null,
+    diagnosis: typeof d.diagnosis === "string" ? d.diagnosis : null,
+    recommendation: typeof d.recommendation === "string" ? d.recommendation : null,
     similarCases: Array.isArray(d.similarCases) ? d.similarCases : [],
     external: wk && wk.summary ? { summary: wk.summary, sources: wk.sources ?? [] } : null,
     aiConfigured: !!d.available,
