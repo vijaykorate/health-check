@@ -15,6 +15,10 @@ interface PublicHc {
   report?: string | null;
 }
 
+// Live per-order state — must never be cached, or the customer's WebView can
+// replay a stale "consent needed" body after they've already approved.
+const NO_STORE = { "Cache-Control": "no-store, no-cache, must-revalidate" };
+
 export async function GET(
   _request: Request,
   ctx: { params: Promise<{ orderId: string }> },
@@ -30,13 +34,16 @@ export async function GET(
     const status = r.status === 404 || r.httpStatus === 404 ? 404 : r.status >= 400 ? r.status : 404;
     return NextResponse.json(
       { error: r.message ?? "No health check has been started for this order yet." },
-      { status },
+      { status, headers: NO_STORE },
     );
   }
-  return NextResponse.json({
-    consentRequested: r.data.consentRequested === true,
-    consentDecision: r.data.consentDecision ?? null,
-    status: r.data.status ?? null,
-    report: r.data.report ?? null,
-  });
+  return NextResponse.json(
+    {
+      consentRequested: r.data.consentRequested === true,
+      consentDecision: r.data.consentDecision ?? null,
+      status: r.data.status ?? null,
+      report: r.data.report ?? null,
+    },
+    { headers: NO_STORE },
+  );
 }
