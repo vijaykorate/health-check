@@ -13,7 +13,12 @@ export async function POST(
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
-  let body: { inspection?: unknown; observations?: string | null } = {};
+  let body: {
+    inspection?: unknown;
+    observations?: string | null;
+    // Per-item remarks keyed "Section|Label", captured for flagged items.
+    remarks?: Record<string, string>;
+  } = {};
   try {
     body = await request.json();
   } catch {
@@ -22,7 +27,11 @@ export async function POST(
   const r = await hcBackend(`api/diagnostics/${encodeURIComponent(id)}/physical-findings`, {
     method: "POST",
     token: me.pockitToken,
-    body: { inspection: body.inspection ?? {}, observations: body.observations ?? null },
+    body: {
+      inspection: body.inspection ?? {},
+      observations: body.observations ?? null,
+      remarks: body.remarks ?? {},
+    },
   });
   if (!r.ok) {
     return NextResponse.json(

@@ -10,7 +10,7 @@ export interface BackendDetail {
   manufacturer: string | null;
   model: string | null;
   diagnostic: DiagnosticReport | Record<string, never> | null;
-  inspection: Record<string, "ok" | "issue" | "na"> | null;
+  inspection: Record<string, "ok" | "issue"> | null;
   observations: string | null;
   primary_finding: string | null;
   severity: string | null;

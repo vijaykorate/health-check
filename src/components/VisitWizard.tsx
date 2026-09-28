@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import type { InspectionStatus, Severity, SessionView } from "@/lib/types";
 import { CATEGORIES, categoryPhase } from "@/lib/categories";
@@ -21,6 +21,12 @@ type Stage =
   | "review"
   | "generating"
   | "done";
+
+// The "Is there any physical damage?" Yes/No question reuses this existing
+// inspection item (Exterior · Physical damage) so no new backend field is
+// needed: Yes → "issue", No → "ok". It's rendered as a dedicated radio block and
+// skipped in the normal per-item loop so it isn't shown twice.
+const PHYSICAL_DAMAGE_KEY = inspectionKey("Exterior", "Physical damage");
 
 const FLOW: { key: Stage; label: string }[] = [
   { key: "launch", label: "Launch" },
@@ -92,6 +98,7 @@ interface DraftCase {
 }
 interface AiDraft {
   finding: string | null;
+  severity: string | null;
   diagnosis: string | null;
   recommendation: string | null;
   similarCases: DraftCase[];
@@ -167,6 +174,36 @@ function Terminal({ lang, command }: { lang: string; command: string }) {
 
 function CommandLabel({ children }: { children: ReactNode }) {
   return <span className="text-[11px] font-bold uppercase tracking-wider text-muted">{children}</span>;
+}
+
+// Remark input shown under an inspection item once it's flagged as an issue.
+// Required when visible — `error` highlights it if the technician tries to
+// continue without filling it in.
+function RemarkField({
+  value,
+  onChange,
+  error,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  error?: boolean;
+}) {
+  return (
+    <div className="mt-1.5">
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Remark — describe the issue"
+        className={`w-full rounded-lg border bg-surface p-2 text-sm text-foreground ${
+          error ? "border-bad" : "border-border"
+        }`}
+      />
+      {error ? (
+        <p className="mt-1 text-xs text-bad">Please add a remark for this issue.</p>
+      ) : null}
+    </div>
+  );
 }
 
 // (Removed) Technician Health Check shift-OTP gate ("Verify your shift"): the
@@ -288,6 +325,12 @@ export function VisitWizard({
   const [os, setOs] = useState<"windows" | "mac">("windows");
 
   const [inspection, setInspection] = useState<Record<string, InspectionStatus>>({});
+  // Free-text remark per item, captured only when an item is flagged "issue"
+  // (keyed the same "Section|Label" as `inspection`).
+  const [remarks, setRemarks] = useState<Record<string, string>>({});
+  // Keys of flagged items still missing a required remark — set on a blocked
+  // Continue so those inputs can highlight.
+  const [remarkErrors, setRemarkErrors] = useState<Set<string>>(new Set());
   const [observations, setObservations] = useState("");
 
   const [primaryFinding, setPrimaryFinding] = useState("");
@@ -296,6 +339,10 @@ export function VisitWizard({
   const [recommendation, setRecommendation] = useState("");
   const [ai, setAi] = useState<AiDraft | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  // Guards the one-shot auto-draft when the technician first reaches Findings.
+  // A ref (not state) so flipping it doesn't itself trigger a render/effect.
+  const autoDraftedRef = useRef(false);
 
   const running = view.status === "running";
   const scanDone = view.status === "scanned" || view.status === "completed";
@@ -349,12 +396,32 @@ export function VisitWizard({
   const summary = view.diagnostic?.Summary;
 
   async function saveInspection() {
+    // Every flagged item ("issue", incl. physical-damage "Yes") must carry a
+    // remark. Block Continue and highlight the offenders if any are empty.
+    const missing = new Set(
+      Object.entries(inspection)
+        .filter(([k, v]) => v === "issue" && !(remarks[k] ?? "").trim())
+        .map(([k]) => k),
+    );
+    if (missing.size > 0) {
+      setRemarkErrors(missing);
+      return;
+    }
+    setRemarkErrors(new Set());
     setBusy(true);
     try {
+      // Only send remarks for items that are actually flagged, so stale remarks
+      // from a toggled-back item don't leak through.
+      const cleanRemarks: Record<string, string> = {};
+      for (const [k, v] of Object.entries(inspection)) {
+        if (v === "issue" && (remarks[k] ?? "").trim()) {
+          cleanRemarks[k] = remarks[k].trim();
+        }
+      }
       await fetch(`/api/diagnostics/${id}/inspection`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ inspection, observations }),
+        body: JSON.stringify({ inspection, observations, remarks: cleanRemarks }),
       });
       setStage("findings");
     } finally {
@@ -378,24 +445,69 @@ export function VisitWizard({
 
   async function draftWithAi() {
     setAiLoading(true);
+    setAiError(null);
     try {
       const res = await fetch(`/api/diagnostics/${id}/ai-draft`, { method: "POST" });
-      if (res.ok) {
-        const draft = (await res.json()) as AiDraft;
-        setAi(draft);
-        if (draft.finding) {
-          const match = FINDING_OPTIONS.find(
-            (f) => f.toLowerCase() === draft.finding!.trim().toLowerCase(),
-          );
-          if (match) setPrimaryFinding(match);
-        }
-        if (draft.diagnosis) setDiagnosis(draft.diagnosis.trim());
-        if (draft.recommendation) setRecommendation(draft.recommendation.trim());
+      if (!res.ok) {
+        setAiError("AI couldn't draft suggestions — fill the fields manually.");
+        return;
       }
+      const draft = (await res.json()) as AiDraft;
+      setAi(draft);
+      let filledAny = false;
+      if (draft.finding) {
+        const match = FINDING_OPTIONS.find(
+          (f) => f.toLowerCase() === draft.finding!.trim().toLowerCase(),
+        );
+        if (match) {
+          setPrimaryFinding(match);
+          filledAny = true;
+        }
+      }
+      if (draft.severity) {
+        const match = SEVERITIES.find(
+          (s) => s.toLowerCase() === draft.severity!.trim().toLowerCase(),
+        );
+        if (match) {
+          setSeverity(match);
+          filledAny = true;
+        }
+      }
+      if (draft.diagnosis) {
+        setDiagnosis(draft.diagnosis.trim());
+        filledAny = true;
+      }
+      if (draft.recommendation) {
+        setRecommendation(draft.recommendation.trim());
+        filledAny = true;
+      }
+      // Nothing usable came back (AI not configured, timeout, or off-format reply).
+      if (!filledAny) {
+        setAiError(
+          draft.aiConfigured === false
+            ? "AI drafting isn't configured — fill the fields manually."
+            : "AI couldn't draft suggestions — fill the fields manually.",
+        );
+      }
+    } catch {
+      setAiError("AI couldn't draft suggestions — fill the fields manually.");
     } finally {
       setAiLoading(false);
     }
   }
+
+  // Auto-draft once the moment the technician lands on Findings, so the four
+  // fields arrive pre-filled. The ref guard makes this fire exactly once per
+  // visit — re-entering Findings from Review won't re-run it, and the manual
+  // "Draft with AI" button remains for an explicit re-draft.
+  useEffect(() => {
+    if (stage === "findings" && !autoDraftedRef.current) {
+      autoDraftedRef.current = true;
+      void draftWithAi();
+    }
+    // draftWithAi is stable for this purpose; keying on `stage` alone is intended.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage]);
 
   async function submitAndDeliver() {
     setBusy(true);
@@ -634,38 +746,114 @@ export function VisitWizard({
           <h2 className="font-display text-xl font-bold text-foreground">Physical inspection</h2>
           <p className="mt-1 text-sm text-muted">Check each item on the machine in front of you.</p>
           <div className="mt-4 flex flex-col gap-4">
+            {/* Is there any physical damage? — reuses the Exterior · Physical
+                damage inspection item (Yes → issue, No → ok). Rendered as a
+                single-select radio and skipped in the section loop below. */}
+            <div className="rounded-2xl border border-border bg-surface p-4">
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-display font-semibold text-foreground">
+                  Is there any physical damage?
+                </span>
+                <div
+                  className="flex gap-1"
+                  role="radiogroup"
+                  aria-label="Is there any physical damage?"
+                >
+                  {(
+                    [
+                      ["issue", "Yes", "bad"],
+                      ["ok", "No", "ok"],
+                    ] as [InspectionStatus, string, "ok" | "bad"][]
+                  ).map(([v, label, tone]) => {
+                    const active = inspection[PHYSICAL_DAMAGE_KEY] === v;
+                    return (
+                      <button
+                        key={v}
+                        type="button"
+                        role="radio"
+                        aria-checked={active}
+                        onClick={() =>
+                          setInspection((s) => ({ ...s, [PHYSICAL_DAMAGE_KEY]: v }))
+                        }
+                        className={`rounded-lg px-3.5 py-1 text-xs font-semibold ${
+                          active ? toneClasses[tone] : "border border-border text-muted"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              {inspection[PHYSICAL_DAMAGE_KEY] === "issue" ? (
+                <RemarkField
+                  value={remarks[PHYSICAL_DAMAGE_KEY] ?? ""}
+                  error={remarkErrors.has(PHYSICAL_DAMAGE_KEY)}
+                  onChange={(v) => {
+                    setRemarks((s) => ({ ...s, [PHYSICAL_DAMAGE_KEY]: v }));
+                    if (v.trim())
+                      setRemarkErrors((s) => {
+                        if (!s.has(PHYSICAL_DAMAGE_KEY)) return s;
+                        const n = new Set(s);
+                        n.delete(PHYSICAL_DAMAGE_KEY);
+                        return n;
+                      });
+                  }}
+                />
+              ) : null}
+            </div>
+
             {INSPECTION_SECTIONS.map((sec) => (
               <div key={sec.section} className="rounded-2xl border border-border bg-surface p-4">
                 <div className="font-display font-semibold text-foreground">{sec.section}</div>
-                <div className="mt-2 flex flex-col gap-2">
-                  {sec.items.map((item) => {
-                    const key = inspectionKey(sec.section, item);
-                    const val = inspection[key];
-                    return (
-                      <div key={key} className="flex items-center justify-between gap-3">
-                        <span className="text-sm text-foreground">{item}</span>
-                        <div className="flex gap-1">
-                          {(
-                            [
-                              ["ok", "OK", "ok"],
-                              ["issue", "Issue", "bad"],
-                              ["na", "N/T", "unknown"],
-                            ] as [InspectionStatus, string, "ok" | "bad" | "unknown"][]
-                          ).map(([v, label, tone]) => (
-                            <button
-                              key={v}
-                              onClick={() => setInspection((s) => ({ ...s, [key]: v }))}
-                              className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${
-                                val === v ? toneClasses[tone] : "border border-border text-muted"
-                              }`}
-                            >
-                              {label}
-                            </button>
-                          ))}
+                <div className="mt-2 flex flex-col gap-3">
+                  {sec.items
+                    .filter((item) => inspectionKey(sec.section, item) !== PHYSICAL_DAMAGE_KEY)
+                    .map((item) => {
+                      const key = inspectionKey(sec.section, item);
+                      const val = inspection[key];
+                      return (
+                        <div key={key} className="flex flex-col gap-1">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-sm text-foreground">{item}</span>
+                            <div className="flex gap-1">
+                              {(
+                                [
+                                  ["ok", "OK", "ok"],
+                                  ["issue", "Issue", "bad"],
+                                ] as [InspectionStatus, string, "ok" | "bad"][]
+                              ).map(([v, label, tone]) => (
+                                <button
+                                  key={v}
+                                  onClick={() => setInspection((s) => ({ ...s, [key]: v }))}
+                                  className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${
+                                    val === v ? toneClasses[tone] : "border border-border text-muted"
+                                  }`}
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          {val === "issue" ? (
+                            <RemarkField
+                              value={remarks[key] ?? ""}
+                              error={remarkErrors.has(key)}
+                              onChange={(v) => {
+                                setRemarks((s) => ({ ...s, [key]: v }));
+                                if (v.trim())
+                                  setRemarkErrors((s) => {
+                                    if (!s.has(key)) return s;
+                                    const n = new Set(s);
+                                    n.delete(key);
+                                    return n;
+                                  });
+                              }}
+                            />
+                          ) : null}
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
                 </div>
               </div>
             ))}
@@ -677,6 +865,11 @@ export function VisitWizard({
               className="w-full resize-none rounded-xl border border-border bg-surface p-3 text-sm text-foreground"
             />
           </div>
+          {remarkErrors.size > 0 ? (
+            <p className="mt-3 text-sm text-bad">
+              Add a remark for each item marked as an issue before continuing.
+            </p>
+          ) : null}
           <button
             onClick={saveInspection}
             disabled={busy}
@@ -697,9 +890,14 @@ export function VisitWizard({
               disabled={aiLoading}
               className="rounded-lg border border-brand px-3 py-1.5 text-xs font-semibold text-brand hover:bg-brand/10 disabled:opacity-60"
             >
-              {aiLoading ? "Drafting…" : "Draft with AI"}
+              {aiLoading ? "Drafting…" : ai ? "Re-draft with AI" : "Draft with AI"}
             </button>
           </div>
+          {aiLoading ? (
+            <p className="mt-2 text-xs text-muted">Drafting suggestions with AI…</p>
+          ) : aiError ? (
+            <p className="mt-2 text-xs text-bad">{aiError}</p>
+          ) : null}
 
           <div className="mt-4 rounded-2xl border border-border bg-surface p-4">
             <label className="block text-xs font-semibold text-muted">Primary finding</label>
@@ -833,9 +1031,14 @@ export function VisitWizard({
             {issues.length === 0 ? (
               <p className="mt-1 text-sm text-ok">No physical issues flagged.</p>
             ) : (
-              <ul className="mt-1 text-sm text-bad">
+              <ul className="mt-1 space-y-1 text-sm text-bad">
                 {issues.map(([k]) => (
-                  <li key={k}>• {k.replace("|", " — ")}</li>
+                  <li key={k}>
+                    • {k.replace("|", " — ")}
+                    {remarks[k]?.trim() ? (
+                      <span className="text-muted"> — {remarks[k].trim()}</span>
+                    ) : null}
+                  </li>
                 ))}
               </ul>
             )}

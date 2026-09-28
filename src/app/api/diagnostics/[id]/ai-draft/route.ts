@@ -59,6 +59,7 @@ export async function POST(
 
   return NextResponse.json({
     finding: draft?.finding ?? null,
+    severity: draft?.severity ?? null,
     diagnosis: draft?.diagnosis ?? null,
     recommendation: draft?.recommendation ?? null,
     similarCases,

@@ -126,8 +126,11 @@ export interface TechnicianFindings {
 }
 
 /** Physical inspection result per item (keyed "Section|Label"). */
-export type InspectionStatus = "ok" | "issue" | "na";
+export type InspectionStatus = "ok" | "issue";
 export type Inspection = Record<string, InspectionStatus>;
+/** Free-text remark per inspection item (keyed "Section|Label"), captured when
+ *  an item is flagged as an issue. */
+export type InspectionRemarks = Record<string, string>;
 
 /**
  * Internal session record (camelCase — this is ours, not the engine's).

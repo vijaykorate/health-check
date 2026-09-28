@@ -7,8 +7,18 @@ const DRAFT_TIMEOUT_MS = 30000;
 
 export interface AiDraftResult {
   finding?: string;
+  severity?: string;
   diagnosis?: string;
   recommendation?: string;
+}
+
+const SEVERITY_OPTIONS = ["Low", "Medium", "High", "Critical"] as const;
+
+/** Normalise the model's severity word to one of the canonical options. */
+function normaliseSeverity(raw?: string): string | undefined {
+  if (!raw) return undefined;
+  const hit = SEVERITY_OPTIONS.find((s) => s.toLowerCase() === raw.trim().toLowerCase());
+  return hit;
 }
 export interface AiWebKnowledge {
   summary: string;
@@ -45,17 +55,19 @@ Automatic diagnostic checks:
 ${checksSummary || "none available"}
 Physical inspection issues noted: ${inspectionSummary}
 
-Reply with exactly three lines in this format, no extra commentary:
+Reply with exactly four lines in this format, no extra commentary:
 FINDING: <one of Battery issue, Charger/adapter issue, Storage issue, RAM/performance issue, Driver/software issue, Display issue, Keyboard issue, Touchpad issue, Camera issue, Audio issue, Network issue, Physical damage, No fault found, Further diagnosis required>
+SEVERITY: <one of Low, Medium, High, Critical>
 DIAGNOSIS: <one or two plain-language sentences on what's actually wrong>
 RECOMMENDATION: <one or two plain-language sentences on the next action for the customer>`;
 
     const text = await geminiGenerate(prompt, 0.3, DRAFT_MODEL, DRAFT_TIMEOUT_MS);
     const finding = (text.match(/FINDING:\s*(.+)/i) || [])[1]?.trim();
+    const severity = normaliseSeverity((text.match(/SEVERITY:\s*(.+)/i) || [])[1]);
     const diagnosis = (text.match(/DIAGNOSIS:\s*(.+)/i) || [])[1]?.trim();
     const recommendation = (text.match(/RECOMMENDATION:\s*(.+)/i) || [])[1]?.trim();
     if (!diagnosis && !recommendation) return null;
-    return { finding, diagnosis, recommendation };
+    return { finding, severity, diagnosis, recommendation };
   } catch (err) {
     console.error("[hc-ai] draftDiagnosis failed:", (err as Error)?.message || err);
     return null;
