@@ -2,8 +2,17 @@ import type { Check, Inspection } from "./types";
 
 const API_KEY = process.env.GEMINI_API_KEY || "";
 const DRAFT_MODEL = process.env.GEMINI_DRAFT_MODEL || "gemini-flash-lite-latest";
+// Fallback when the primary model is overloaded: gemini-flash-lite-latest has
+// been returning sustained 503 ("high demand") that even retries can't ride out,
+// while gemini-flash-latest stays available. Tried after the primary's retries.
+const DRAFT_FALLBACK_MODEL = process.env.GEMINI_DRAFT_FALLBACK_MODEL || "gemini-flash-latest";
 const THINKING_CONFIG = { thinkingLevel: "low" };
 const DRAFT_TIMEOUT_MS = 30000;
+
+// Primary model, then fallback — de-duplicated in case they're configured the same.
+function modelChain(primary: string): string[] {
+  return [primary, DRAFT_FALLBACK_MODEL].filter((m, i, a) => m && a.indexOf(m) === i);
+}
 
 export interface AiDraftResult {
   finding?: string;
@@ -109,22 +118,25 @@ async function geminiGenerate(
   model: string,
   timeoutMs: number,
 ): Promise<string> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${API_KEY}`;
-  const res = await geminiFetch(
-    url,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature, thinkingConfig: THINKING_CONFIG },
-      }),
-    },
-    timeoutMs,
-  );
-  if (!res.ok) throw new Error(`Gemini HTTP ${res.status}: ${await res.text()}`);
-  const json = await res.json();
-  return json?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  const options = {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature, thinkingConfig: THINKING_CONFIG },
+    }),
+  };
+  let lastRes: Response | null = null;
+  for (const m of modelChain(model)) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${API_KEY}`;
+    const res = await geminiFetch(url, options, timeoutMs);
+    if (res.ok) {
+      const json = await res.json();
+      return json?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    }
+    lastRes = res;
+  }
+  throw new Error(`Gemini HTTP ${lastRes?.status}: ${lastRes ? await lastRes.text() : "no response"}`);
 }
 
 async function geminiGenerateGrounded(
@@ -132,28 +144,35 @@ async function geminiGenerateGrounded(
   model: string,
   timeoutMs: number,
 ): Promise<{ text: string; sources: { title?: string; url?: string }[] }> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${API_KEY}`;
-  const res = await geminiFetch(
-    url,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        tools: [{ google_search: {} }],
-        generationConfig: { thinkingConfig: THINKING_CONFIG },
-      }),
-    },
-    timeoutMs,
-  );
-  if (!res.ok) throw new Error(`Gemini HTTP ${res.status}: ${await res.text()}`);
-  const json = await res.json();
-  const candidate = json?.candidates?.[0];
+  const options = {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      tools: [{ google_search: {} }],
+      generationConfig: { thinkingConfig: THINKING_CONFIG },
+    }),
+  };
+  let json: Record<string, unknown> | null = null;
+  let lastRes: Response | null = null;
+  for (const m of modelChain(model)) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${API_KEY}`;
+    const res = await geminiFetch(url, options, timeoutMs);
+    if (res.ok) {
+      json = await res.json();
+      break;
+    }
+    lastRes = res;
+  }
+  if (!json) throw new Error(`Gemini HTTP ${lastRes?.status}: ${lastRes ? await lastRes.text() : "no response"}`);
+  const candidate = (json as { candidates?: unknown[] })?.candidates?.[0] as
+    | { content?: { parts?: { text?: string }[] }; groundingMetadata?: { groundingChunks?: { web?: { title?: string; uri?: string } }[] } }
+    | undefined;
   const text = candidate?.content?.parts?.[0]?.text || "";
   const sources = (candidate?.groundingMetadata?.groundingChunks || [])
     .map((c: { web?: { title?: string; uri?: string } }) => c?.web)
     .filter(Boolean)
-    .map((w: { title?: string; uri?: string }) => ({ title: w.title, url: w.uri }));
+    .map((w) => ({ title: w!.title, url: w!.uri }));
   return { text, sources };
 }
 
