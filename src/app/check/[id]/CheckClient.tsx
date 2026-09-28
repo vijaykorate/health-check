@@ -15,8 +15,8 @@ import { BrandMark } from "@/components/Brand";
 // only needs a low-frequency refresh to animate progress, and everything else
 // (waiting on customer consent, launch, connect) changes even less often.
 const POLL_ACTIVE_MS = 3000; // scan actively streaming progress
-const POLL_WAIT_MS = 2000; // waiting on launch / connect (percent 0)
-const POLL_PENDING_MS = 1000; // consent request is PENDING — poll fast so the tech screen flips the moment the customer approves
+const POLL_WAIT_MS = 2000; // fallback for any non-running, non-terminal state
+const POLL_FAST_MS = 1000; // any pre-progress wait (consent PENDING, or scan not yet started) — poll fast so the screen flips the moment the backend reflects approval / the first progress post
 const POLL_HIDDEN_MS = 5000; // tab hidden: back off, just re-check visibility
 
 // Session-level terminal states: once reached, the row will not change via
@@ -93,12 +93,14 @@ export function CheckClient({ id }: { id: string }) {
         setView(data);
         // Terminal session state: stop polling entirely (no reschedule).
         if (TERMINAL_STATUSES.has(data.status)) return;
-        // Fastest while consent is PENDING (approval should flip the screen
-        // almost immediately); 3s only while a scan is actively streaming.
+        // Poll fast through every pre-progress wait — consent PENDING, or the scan
+        // hasn't started yet (running at 0%) — so approval and the first progress
+        // post show almost immediately. Slow to 3s only once progress is streaming.
         const active = data.status === "running" && data.percent > 0;
+        const preScanWait = data.status === "running" && data.percent === 0;
         const ms =
-          data.consentStatus === "PENDING"
-            ? POLL_PENDING_MS
+          data.consentStatus === "PENDING" || preScanWait
+            ? POLL_FAST_MS
             : active
               ? POLL_ACTIVE_MS
               : POLL_WAIT_MS;

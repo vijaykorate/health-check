@@ -25,7 +25,7 @@ export const INSPECTION_SECTIONS: InspectionSection[] = [
   },
   {
     section: "Ports",
-    items: ["USB / USB-C", "HDMI"],
+    items: ["USB / USB-C", "HDMI", "Audio jack", "SD card"],
   },
 ];
 

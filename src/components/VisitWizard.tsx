@@ -754,8 +754,8 @@ export function VisitWizard({
                             <div className="flex gap-1">
                               {(
                                 [
-                                  ["ok", "OK", "ok"],
-                                  ["issue", "Issue", "bad"],
+                                  ["ok", "Yes", "ok"],
+                                  ["issue", "No", "bad"],
                                 ] as [InspectionStatus, string, "ok" | "bad"][]
                               ).map(([v, label, tone]) => (
                                 <button
