@@ -15,7 +15,8 @@ import { BrandMark } from "@/components/Brand";
 // only needs a low-frequency refresh to animate progress, and everything else
 // (waiting on customer consent, launch, connect) changes even less often.
 const POLL_ACTIVE_MS = 3000; // scan actively streaming progress
-const POLL_WAIT_MS = 2000; // waiting on consent / launch / connect (percent 0) — snappy so the tech screen detects the customer's approval + scan start quickly
+const POLL_WAIT_MS = 2000; // waiting on launch / connect (percent 0)
+const POLL_PENDING_MS = 1000; // consent request is PENDING — poll fast so the tech screen flips the moment the customer approves
 const POLL_HIDDEN_MS = 5000; // tab hidden: back off, just re-check visibility
 
 // Session-level terminal states: once reached, the row will not change via
@@ -77,30 +78,63 @@ export function CheckClient({ id }: { id: string }) {
       try {
         const res = await fetch(`/api/diagnostics/${id}`, { cache: "no-store" });
         if (!res.ok) {
-          if (res.status === 404) throw new Error("Session not found.");
+          // 404 is terminal (the session doesn't exist) — surface it and stop.
+          // Any other status is transient (backend restart, 5xx, blip): keep
+          // polling instead of freezing the screen.
+          if (res.status === 404) {
+            if (!cancelled) setFetchError("Session not found.");
+            return;
+          }
           throw new Error(`Poll failed (${res.status})`);
         }
         const data = (await res.json()) as SessionView;
         if (cancelled) return;
+        setFetchError(null); // recovered from any prior transient error
         setView(data);
         // Terminal session state: stop polling entirely (no reschedule).
         if (TERMINAL_STATUSES.has(data.status)) return;
-        // 3s only while a scan is actively streaming progress; slower otherwise.
+        // Fastest while consent is PENDING (approval should flip the screen
+        // almost immediately); 3s only while a scan is actively streaming.
         const active = data.status === "running" && data.percent > 0;
-        schedule(active ? POLL_ACTIVE_MS : POLL_WAIT_MS);
-      } catch (e) {
+        const ms =
+          data.consentStatus === "PENDING"
+            ? POLL_PENDING_MS
+            : active
+              ? POLL_ACTIVE_MS
+              : POLL_WAIT_MS;
+        schedule(ms);
+      } catch {
+        // Transient error — don't kill the loop; retry on the wait cadence.
         if (cancelled) return;
-        setFetchError((e as Error).message);
-        return; // stop on error (incl. 404) — deps are [id], so no re-arm
+        schedule(POLL_WAIT_MS);
       } finally {
         inFlight = false;
       }
+    }
+
+    // Refetch the moment the tab regains focus, instead of waiting out the
+    // (up to 5s) hidden-tab timer — so an approval that lands while the tech
+    // tabbed away shows immediately on return.
+    const onVisible = () => {
+      if (cancelled || inFlight) return;
+      if (typeof document !== "undefined" && document.hidden) return;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      tick();
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisible);
     }
 
     tick(); // exactly one loop starts here
     return () => {
       cancelled = true;
       if (timeoutId) clearTimeout(timeoutId);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisible);
+      }
     };
   }, [id]);
 

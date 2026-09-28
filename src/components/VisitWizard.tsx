@@ -22,12 +22,6 @@ type Stage =
   | "generating"
   | "done";
 
-// The "Is there any physical damage?" Yes/No question reuses this existing
-// inspection item (Exterior · Physical damage) so no new backend field is
-// needed: Yes → "issue", No → "ok". It's rendered as a dedicated radio block and
-// skipped in the normal per-item loop so it isn't shown twice.
-const PHYSICAL_DAMAGE_KEY = inspectionKey("Exterior", "Physical damage");
-
 const FLOW: { key: Stage; label: string }[] = [
   { key: "launch", label: "Launch" },
   { key: "scanning", label: "Scan" },
@@ -746,71 +740,12 @@ export function VisitWizard({
           <h2 className="font-display text-xl font-bold text-foreground">Physical inspection</h2>
           <p className="mt-1 text-sm text-muted">Check each item on the machine in front of you.</p>
           <div className="mt-4 flex flex-col gap-4">
-            {/* Is there any physical damage? — reuses the Exterior · Physical
-                damage inspection item (Yes → issue, No → ok). Rendered as a
-                single-select radio and skipped in the section loop below. */}
-            <div className="rounded-2xl border border-border bg-surface p-4">
-              <div className="flex items-center justify-between gap-3">
-                <span className="font-display font-semibold text-foreground">
-                  Is there any physical damage?
-                </span>
-                <div
-                  className="flex gap-1"
-                  role="radiogroup"
-                  aria-label="Is there any physical damage?"
-                >
-                  {(
-                    [
-                      ["issue", "Yes", "bad"],
-                      ["ok", "No", "ok"],
-                    ] as [InspectionStatus, string, "ok" | "bad"][]
-                  ).map(([v, label, tone]) => {
-                    const active = inspection[PHYSICAL_DAMAGE_KEY] === v;
-                    return (
-                      <button
-                        key={v}
-                        type="button"
-                        role="radio"
-                        aria-checked={active}
-                        onClick={() =>
-                          setInspection((s) => ({ ...s, [PHYSICAL_DAMAGE_KEY]: v }))
-                        }
-                        className={`rounded-lg px-3.5 py-1 text-xs font-semibold ${
-                          active ? toneClasses[tone] : "border border-border text-muted"
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-              {inspection[PHYSICAL_DAMAGE_KEY] === "issue" ? (
-                <RemarkField
-                  value={remarks[PHYSICAL_DAMAGE_KEY] ?? ""}
-                  error={remarkErrors.has(PHYSICAL_DAMAGE_KEY)}
-                  onChange={(v) => {
-                    setRemarks((s) => ({ ...s, [PHYSICAL_DAMAGE_KEY]: v }));
-                    if (v.trim())
-                      setRemarkErrors((s) => {
-                        if (!s.has(PHYSICAL_DAMAGE_KEY)) return s;
-                        const n = new Set(s);
-                        n.delete(PHYSICAL_DAMAGE_KEY);
-                        return n;
-                      });
-                  }}
-                />
-              ) : null}
-            </div>
-
             {INSPECTION_SECTIONS.map((sec) => (
               <div key={sec.section} className="rounded-2xl border border-border bg-surface p-4">
                 <div className="font-display font-semibold text-foreground">{sec.section}</div>
                 <div className="mt-2 flex flex-col gap-3">
-                  {sec.items
-                    .filter((item) => inspectionKey(sec.section, item) !== PHYSICAL_DAMAGE_KEY)
-                    .map((item) => {
-                      const key = inspectionKey(sec.section, item);
+                  {sec.items.map((item) => {
+                    const key = inspectionKey(sec.section, item);
                       const val = inspection[key];
                       return (
                         <div key={key} className="flex flex-col gap-1">

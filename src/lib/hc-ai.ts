@@ -110,7 +110,7 @@ async function geminiGenerate(
   timeoutMs: number,
 ): Promise<string> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${API_KEY}`;
-  const res = await fetchWithTimeout(
+  const res = await geminiFetch(
     url,
     {
       method: "POST",
@@ -133,7 +133,7 @@ async function geminiGenerateGrounded(
   timeoutMs: number,
 ): Promise<{ text: string; sources: { title?: string; url?: string }[] }> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${API_KEY}`;
-  const res = await fetchWithTimeout(
+  const res = await geminiFetch(
     url,
     {
       method: "POST",
@@ -169,4 +169,39 @@ async function fetchWithTimeout(
   } finally {
     clearTimeout(timer);
   }
+}
+
+// Gemini's shared "-latest" models return 503 ("model experiencing high demand")
+// and 429 (rate limit) under load — transient conditions that a short retry rides
+// out. Without this, a single 503 surfaces to the technician as "AI couldn't draft".
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+const RETRY_BACKOFF_MS = [700, 1500];
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// fetchWithTimeout + retry on transient upstream failures (retryable HTTP status
+// or a network/abort error). Returns the final Response (which may still be
+// non-ok — the caller decides how to surface that).
+async function geminiFetch(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= RETRY_BACKOFF_MS.length; attempt++) {
+    try {
+      const res = await fetchWithTimeout(url, options, timeoutMs);
+      if (res.ok || !RETRYABLE_STATUS.has(res.status) || attempt === RETRY_BACKOFF_MS.length) {
+        return res;
+      }
+    } catch (err) {
+      lastErr = err;
+      if (attempt === RETRY_BACKOFF_MS.length) throw err;
+    }
+    await sleep(RETRY_BACKOFF_MS[attempt]);
+  }
+  // Unreachable (loop returns/throws on the last attempt), but satisfies the type.
+  throw lastErr ?? new Error("Gemini request failed");
 }

@@ -6,22 +6,26 @@ export interface InspectionSection {
   items: string[];
 }
 
+// Section names AND item labels must match the backend report's Physical
+// Inspection taxonomy EXACTLY — the report keys each row on "Section|Label", so
+// any mismatch renders as "Not Tested" (only "Touchpad click" used to line up).
+// Item labels below are transcribed from the delivered report.
 export const INSPECTION_SECTIONS: InspectionSection[] = [
   {
     section: "Exterior",
-    items: ["Chassis / body", "Hinges", "Screws present", "Rubber feet", "Physical damage"],
+    items: ["No visible damage", "Minor scratches", "Cracked casing / hinges", "Liquid damage suspected"],
   },
   {
     section: "Display",
-    items: ["Panel (no cracks)", "Backlight even", "Dead / stuck pixels", "Bezel & webcam"],
+    items: ["No visible issue", "Dead pixels", "Flickering", "Brightness issue"],
   },
   {
     section: "Keyboard & Touchpad",
-    items: ["All keys present", "Keys responsive", "Touchpad click", "Palm rest"],
+    items: ["Keys working", "Sticky / missing keys", "Touchpad click", "Gestures"],
   },
   {
     section: "Ports",
-    items: ["USB ports", "HDMI / video", "Audio jack", "Charging port"],
+    items: ["USB / USB-C", "HDMI"],
   },
 ];
 
