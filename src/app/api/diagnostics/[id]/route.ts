@@ -63,6 +63,7 @@ export async function GET(
     rescan: d.rescan ?? null,
     rescanStatus: d.rescanStatus ?? null,
     rescanAt: d.rescanAt ?? null,
+    fixes: Array.isArray(d.fixes) ? d.fixes : [],
     observations: d.observations ?? null,
     delivered: d.status === "completed",
     // This standalone UI is always an on-site technician visit; a truthy

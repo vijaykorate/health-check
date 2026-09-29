@@ -461,13 +461,32 @@ export function VisitWizard({
   }
 
   // Optional, technician-only Rescan AFTER completion. Does not reopen or change the
-  // completed Health Check — it arms a rescan server-side and shows the launcher so
-  // the same command can be re-run; the result is stored separately (RESCAN_JSON).
+  // completed Health Check — the technician records any fixes/actions performed, then
+  // arms a rescan server-side and re-runs the same command; the rescan result is
+  // stored separately. Fixes + rescan appear in the report's before/after section.
   const [rescanError, setRescanError] = useState<string | null>(null);
+  const [fixes, setFixes] = useState<Array<{ action: string; note: string }>>(
+    () =>
+      view.fixes && view.fixes.length
+        ? view.fixes.map((f) => ({ action: f.action ?? "", note: f.note ?? "" }))
+        : [{ action: "", note: "" }],
+  );
   async function startRescan() {
     setBusy(true);
     setRescanError(null);
     try {
+      // Persist the technician's fixes/actions first (best-effort — a rescan can
+      // still proceed if none were recorded).
+      const clean = fixes
+        .map((f) => ({ action: f.action.trim(), note: f.note.trim() }))
+        .filter((f) => f.action || f.note);
+      if (clean.length) {
+        await fetch(`/api/diagnostics/${id}/fixes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fixes: clean }),
+        }).catch(() => {});
+      }
       const r = await fetch(`/api/diagnostics/${id}/start-rescan`, { method: "POST" });
       if (!r.ok) {
         const d = (await r.json().catch(() => ({}))) as { error?: string };
@@ -1216,6 +1235,49 @@ export function VisitWizard({
                 {busy ? "Starting…" : view.rescan ? "Run rescan again" : "Rescan"}
               </button>
             </div>
+
+            {/* Fixes / actions performed before the rescan (shown in the report). */}
+            <div className="mt-3 border-t border-border pt-3">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-bold uppercase tracking-wide text-muted">Fixes / actions taken (optional)</div>
+                <button
+                  onClick={() => setFixes((s) => [...s, { action: "", note: "" }])}
+                  className="rounded-lg border border-brand px-2.5 py-1 text-xs font-semibold text-brand hover:bg-brand/10"
+                >
+                  + Add
+                </button>
+              </div>
+              <div className="mt-2 flex flex-col gap-2">
+                {fixes.map((f, i) => (
+                  <div key={i} className="flex gap-2">
+                    <input
+                      value={f.action}
+                      onChange={(e) => setFixes((s) => s.map((x, j) => (j === i ? { ...x, action: e.target.value } : x)))}
+                      placeholder="Action (e.g. Driver update)"
+                      className="w-1/3 rounded-lg border border-border bg-surface p-2 text-sm text-foreground"
+                    />
+                    <input
+                      value={f.note}
+                      onChange={(e) => setFixes((s) => s.map((x, j) => (j === i ? { ...x, note: e.target.value } : x)))}
+                      placeholder="What was done / observed"
+                      className="flex-1 rounded-lg border border-border bg-surface p-2 text-sm text-foreground"
+                    />
+                    {fixes.length > 1 ? (
+                      <button
+                        onClick={() => setFixes((s) => s.filter((_, j) => j !== i))}
+                        className="rounded-lg border border-border px-2 text-sm text-muted hover:border-bad hover:text-bad"
+                      >
+                        ×
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+              <p className="mt-1 text-[11px] text-muted">
+                Record what you fixed before rescanning; it appears in the report&rsquo;s before/after.
+              </p>
+            </div>
+
             {rescanError ? <p className="mt-2 text-sm text-bad">{rescanError}</p> : null}
             {view.rescan ? (
               <div className="mt-3 border-t border-border pt-3">

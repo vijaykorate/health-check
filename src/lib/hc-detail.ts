@@ -17,6 +17,8 @@ export interface BackendDetail {
   rescan?: DiagnosticReport | null;
   rescanStatus?: "running" | "scanned" | string | null;
   rescanAt?: string | null;
+  // Technician fixes/actions performed between the original scan and the rescan.
+  fixes?: Array<{ action?: string; note?: string }> | null;
   observations: string | null;
   primary_finding: string | null;
   severity: string | null;

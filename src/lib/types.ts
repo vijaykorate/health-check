@@ -200,6 +200,8 @@ export interface SessionView {
   rescan?: DiagnosticReport | null;
   rescanStatus?: "running" | "scanned" | string | null;
   rescanAt?: string | null;
+  /** Technician fixes/actions performed between the original scan and the rescan. */
+  fixes?: Array<{ action?: string; note?: string }>;
   observations: string | null;
   delivered: boolean;
   orderId: string | null;
