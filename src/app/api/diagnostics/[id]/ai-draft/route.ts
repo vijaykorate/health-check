@@ -46,9 +46,11 @@ export async function POST(
   const problem = d.problem ?? diagnostic?.Complaint?.Description ?? null;
   const checks = diagnostic?.Checks ?? [];
   const inspection = d.inspection ?? {};
+  const remarks = d.remarks ?? {};
+  const healthScore = diagnostic?.Summary?.HealthScore ?? null;
 
   const [draft, external, similarR] = await Promise.all([
-    draftDiagnosis({ problem, checks, inspection }),
+    draftDiagnosis({ problem, checks, inspection, remarks, healthScore }),
     searchKnowledgeBase({ manufacturer, model, category, problem }),
     similarPromise,
   ]);

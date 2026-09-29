@@ -11,6 +11,12 @@ export interface BackendDetail {
   model: string | null;
   diagnostic: DiagnosticReport | Record<string, never> | null;
   inspection: Record<string, "ok" | "issue"> | null;
+  remarks: Record<string, string> | null;
+  // Optional Rescan (technician-only, after completion), stored in the
+  // INSPECTION_JSON envelope — no schema change. Null/absent otherwise.
+  rescan?: DiagnosticReport | null;
+  rescanStatus?: "running" | "scanned" | string | null;
+  rescanAt?: string | null;
   observations: string | null;
   primary_finding: string | null;
   severity: string | null;

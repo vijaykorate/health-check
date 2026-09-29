@@ -194,6 +194,12 @@ export interface SessionView {
   /** True when a running scan has exceeded the stalled threshold (feature 5). */
   stalled: boolean;
   inspection: Inspection;
+  /** Per-item technician remarks keyed "Section|Label" (only for flagged items). */
+  remarks?: Record<string, string>;
+  /** Optional Rescan (technician-only, after completion). Null/absent otherwise. */
+  rescan?: DiagnosticReport | null;
+  rescanStatus?: "running" | "scanned" | string | null;
+  rescanAt?: string | null;
   observations: string | null;
   delivered: boolean;
   orderId: string | null;

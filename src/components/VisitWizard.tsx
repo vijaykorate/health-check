@@ -20,7 +20,10 @@ type Stage =
   | "findings"
   | "review"
   | "generating"
-  | "done";
+  | "done"
+  // Optional post-completion Rescan (technician-only) — not part of the main flow.
+  | "rescanlaunch"
+  | "rescanning";
 
 const FLOW: { key: Stage; label: string }[] = [
   { key: "launch", label: "Launch" },
@@ -36,7 +39,7 @@ function Stepper({ stage }: { stage: Stage }) {
   const idxOf = (s: Stage) =>
     s === "connecting"
       ? order.indexOf("scanning")
-      : s === "generating"
+      : s === "generating" || s === "rescanlaunch" || s === "rescanning"
         ? order.indexOf("done")
         : order.indexOf(s);
   const cur = idxOf(stage);
@@ -213,11 +216,17 @@ function RemarkField({
 function CustomerConsentPanel({ id, status }: { id: string; status: string | null }) {
   const approved = status === "APPROVED";
   const rejected = status === "REJECTED";
+  // Persisted "waiting" state: the backend keeps CONSENT_STATUS='PENDING' from the
+  // moment the request is raised until the customer decides, so deriving from the
+  // status (not just local React state) means a page refresh still shows "Waiting"
+  // instead of falling back to "Send consent".
+  const pending = status === "PENDING";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Did the technician send in THIS view? Drives "Send" → "Resend" and the
-  // "waiting" state — so it always starts as "Send" until they tap it.
+  // Optimistic flag for the moment right after clicking Send, before the next poll
+  // reflects PENDING. The persistent waiting state comes from `pending` above.
   const [hasSent, setHasSent] = useState(false);
+  const waiting = hasSent || pending;
   // 10-second cooldown between sends so the customer isn't spammed.
   const [cooldown, setCooldown] = useState(0);
   useEffect(() => {
@@ -258,7 +267,7 @@ function CustomerConsentPanel({ id, status }: { id: string; status: string | nul
             <span className="rounded-full bg-ok-bg px-3 py-1 text-xs font-semibold text-ok">Approved ✓</span>
           ) : rejected ? (
             <span className="rounded-full bg-bad-bg px-3 py-1 text-xs font-semibold text-bad">Declined</span>
-          ) : hasSent ? (
+          ) : waiting ? (
             <span className="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-xs font-semibold text-muted">
               <span className="h-2 w-2 animate-pulse rounded-full bg-brand" />
               Waiting for customer…
@@ -277,11 +286,11 @@ function CustomerConsentPanel({ id, status }: { id: string; status: string | nul
               ? `Resend in ${cooldown}s`
               : busy
                 ? "Sending…"
-                : hasSent
+                : waiting
                   ? "Resend consent request"
                   : "Send consent to customer"}
           </button>
-          {hasSent && !rejected ? (
+          {waiting && !rejected ? (
             <p className="mt-3 text-sm text-muted">
               Sent — waiting for the customer to Approve or Decline in their Pockit app.
             </p>
@@ -318,10 +327,14 @@ export function VisitWizard({
   const [deliverError, setDeliverError] = useState<string | null>(null);
   const [os, setOs] = useState<"windows" | "mac">("windows");
 
-  const [inspection, setInspection] = useState<Record<string, InspectionStatus>>({});
+  // Seed from the persisted backend state so a page refresh mid-visit restores
+  // the technician's answers/remarks instead of clearing them.
+  const [inspection, setInspection] = useState<Record<string, InspectionStatus>>(
+    () => view.inspection ?? {},
+  );
   // Free-text remark per item, captured only when an item is flagged "issue"
   // (keyed the same "Section|Label" as `inspection`).
-  const [remarks, setRemarks] = useState<Record<string, string>>({});
+  const [remarks, setRemarks] = useState<Record<string, string>>(() => view.remarks ?? {});
   // Keys of flagged items still missing a required remark — set on a blocked
   // Continue so those inputs can highlight.
   const [remarkErrors, setRemarkErrors] = useState<Set<string>>(new Set());
@@ -366,25 +379,35 @@ export function VisitWizard({
     // Already reviewed + delivered: show the completion screen and never re-enter
     // the inspection/review/submit flow — re-submitting a completed session
     // errors "This session was already reviewed and submitted".
+    const anyLive = view.percent > 0 || (!!view.stage && view.stage !== "connecting");
     if (view.status === "completed") {
-      if (stage !== "done" && stage !== "generating") setStage("done");
+      // The Health Check is completed and stays completed. The ONLY thing that runs
+      // after this is the OPTIONAL technician Rescan, which never reopens the check.
+      if (view.rescanStatus === "running") {
+        // Rescan armed/in-progress → drive its sub-stages; do not force "done".
+        if (anyLive && stage === "rescanlaunch") setStage("rescanning");
+        return;
+      }
+      // Rescan finished → return to the completion screen (it shows the result).
+      if (stage === "rescanning") {
+        setStage("done");
+        return;
+      }
+      // Normal completed state (also the initial landing). Don't clobber the
+      // rescan launcher the technician just opened.
+      if (stage !== "done" && stage !== "generating" && stage !== "rescanlaunch") setStage("done");
       return;
     }
-    // Show the live scan the MOMENT it starts — any progress, or a real stage past
-    // "connecting" — so the technician watches the % climb instead of jumping
-    // straight from launch to inspection ("nothing, then suddenly done").
-    const scanLive =
-      view.status === "running" && (view.percent > 0 || (!!view.stage && view.stage !== "connecting"));
+    // Normal (original) single-scan lifecycle: launch → scanning → inspection.
+    const scanLive = view.status === "running" && anyLive;
     if (scanUnlocked && scanLive && (stage === "launch" || stage === "connecting")) {
       setStage("scanning");
     }
-    // Scan finished: if we never showed the scanning ring (fast scan / missed the
-    // window), show it first; otherwise advance to the technician's inspection.
     if (view.status === "scanned") {
       if (stage === "launch" || stage === "connecting") setStage("scanning");
       else if (stage === "scanning") setStage("inspection");
     }
-  }, [view.status, view.percent, view.stage, scanUnlocked, stage]);
+  }, [view.status, view.percent, view.stage, view.rescanStatus, scanUnlocked, stage]);
 
   const checks = view.diagnostic?.Checks ?? [];
   const summary = view.diagnostic?.Summary;
@@ -432,6 +455,39 @@ export function VisitWizard({
         body: JSON.stringify({ primaryFinding, severity, diagnosis, recommendation }),
       });
       setStage("review");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Optional, technician-only Rescan AFTER completion. Does not reopen or change the
+  // completed Health Check — it arms a rescan server-side and shows the launcher so
+  // the same command can be re-run; the result is stored separately (RESCAN_JSON).
+  const [rescanError, setRescanError] = useState<string | null>(null);
+  async function startRescan() {
+    setBusy(true);
+    setRescanError(null);
+    try {
+      const r = await fetch(`/api/diagnostics/${id}/start-rescan`, { method: "POST" });
+      if (!r.ok) {
+        const d = (await r.json().catch(() => ({}))) as { error?: string };
+        setRescanError(d.error ?? "Could not start the rescan.");
+        return;
+      }
+      setStage("rescanlaunch");
+    } catch {
+      setRescanError("Something went wrong. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // After a rescan completes, refresh the downloadable PDF so it includes the
+  // Rescan Result section (does not change the original completed result).
+  async function regenerateReport() {
+    setBusy(true);
+    try {
+      await fetch(`/api/diagnostics/${id}/regenerate-report`, { method: "POST" });
     } finally {
       setBusy(false);
     }
@@ -754,8 +810,10 @@ export function VisitWizard({
                             <div className="flex gap-1">
                               {(
                                 [
-                                  ["ok", "Yes", "ok"],
-                                  ["issue", "No", "bad"],
+                                  // Yes = the finding IS present (stored "issue" → shows a remark);
+                                  // No = fine (stored "ok"). Questions are phrased so Yes = problem.
+                                  ["issue", "Yes", "bad"],
+                                  ["ok", "No", "ok"],
                                 ] as [InspectionStatus, string, "ok" | "bad"][]
                               ).map(([v, label, tone]) => (
                                 <button
@@ -812,6 +870,74 @@ export function VisitWizard({
           >
             Continue to findings →
           </button>
+        </div>
+      ) : null}
+
+      {/* R1 · Rescan launcher — re-run the SAME command after completion */}
+      {stage === "rescanlaunch" ? (
+        <div>
+          <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-brand">Rescan</div>
+          <h2 className="mt-1.5 font-display text-2xl font-bold tracking-tight text-foreground">
+            Run a rescan on this machine
+          </h2>
+          <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted">
+            Re-run the same diagnostic on the customer&rsquo;s PC. The result is stored as a
+            separate <b>Rescan</b> — the original Health Check result is not changed.
+          </p>
+          {!launch ? (
+            <div className="mt-5 flex items-center gap-3 rounded-2xl border border-border bg-surface p-6 text-sm text-muted">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-brand" />
+              Preparing command…
+            </div>
+          ) : (
+            <div className="card mt-5 p-6">
+              <div className="mb-4 inline-flex rounded-xl border border-border bg-surface-2/60 p-1 shadow-inner">
+                {(["windows", "mac"] as const).map((o) => (
+                  <button
+                    key={o}
+                    onClick={() => setOs(o)}
+                    className={`rounded-lg px-5 py-1.5 text-sm font-semibold transition-all duration-200 ${
+                      os === o ? "bg-brand text-white" : "text-muted hover:text-foreground"
+                    }`}
+                  >
+                    {o === "windows" ? "Windows" : "macOS"}
+                  </button>
+                ))}
+              </div>
+              {os === "windows" ? (
+                <div className="space-y-5">
+                  <div>
+                    <CommandLabel>Standard</CommandLabel>
+                    <Terminal lang="Windows PowerShell" command={launch.windows.standard} />
+                  </div>
+                  <div>
+                    <CommandLabel>With admin rights · UAC prompt</CommandLabel>
+                    <Terminal lang="Windows PowerShell (elevated)" command={launch.windows.elevated} />
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <CommandLabel>macOS Terminal</CommandLabel>
+                  <Terminal lang="zsh · Terminal" command={launch.mac.command} />
+                </div>
+              )}
+            </div>
+          )}
+          <div className="mt-6 inline-flex items-center gap-2.5 rounded-full border border-border bg-surface-2/60 px-3.5 py-1.5">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand opacity-60" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-brand" />
+            </span>
+            <span className="text-sm font-medium text-muted">Waiting for the rescan to start…</span>
+          </div>
+        </div>
+      ) : null}
+
+      {/* R2 · Rescan progress */}
+      {stage === "rescanning" ? (
+        <div className="flex flex-col items-center">
+          <ProgressRing percent={view.percent} label={view.stage} />
+          <p className="mt-4 max-w-md text-center text-sm text-muted">Rescan · {view.message}</p>
         </div>
       ) : null}
 
@@ -1070,6 +1196,53 @@ export function VisitWizard({
             >
               Back to orders
             </Link>
+          </div>
+
+          {/* Optional technician-only Rescan — never changes the completed result. */}
+          <div className="mt-5 rounded-xl border border-border bg-surface p-4 text-foreground">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="font-display font-semibold">Optional rescan</div>
+                <div className="text-xs text-muted">
+                  Re-run the diagnostic (technician only). The original result stays unchanged;
+                  no new customer consent is needed.
+                </div>
+              </div>
+              <button
+                onClick={startRescan}
+                disabled={busy}
+                className="rounded-xl border border-brand px-4 py-2 text-sm font-semibold text-brand hover:bg-brand/10 disabled:opacity-60"
+              >
+                {busy ? "Starting…" : view.rescan ? "Run rescan again" : "Rescan"}
+              </button>
+            </div>
+            {rescanError ? <p className="mt-2 text-sm text-bad">{rescanError}</p> : null}
+            {view.rescan ? (
+              <div className="mt-3 border-t border-border pt-3">
+                <div className="text-xs font-bold uppercase tracking-wide text-muted">Latest rescan result</div>
+                <div className="mt-1 flex flex-wrap gap-x-6 gap-y-1 text-sm">
+                  <span className="text-muted">
+                    Health score:{" "}
+                    <b className="text-foreground">{view.diagnostic?.Summary?.HealthScore ?? "—"}</b>
+                    <span className="text-muted"> → </span>
+                    <b className="text-foreground">{view.rescan?.Summary?.HealthScore ?? "—"}</b>
+                  </span>
+                  <span className="text-muted">
+                    Status:{" "}
+                    <b className="text-foreground">{view.diagnostic?.Summary?.OverallStatus ?? "—"}</b>
+                    <span className="text-muted"> → </span>
+                    <b className="text-foreground">{view.rescan?.Summary?.OverallStatus ?? "—"}</b>
+                  </span>
+                </div>
+                <button
+                  onClick={regenerateReport}
+                  disabled={busy}
+                  className="mt-3 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted hover:border-brand hover:text-brand disabled:opacity-60"
+                >
+                  {busy ? "Updating…" : "Update report with rescan"}
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}

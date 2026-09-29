@@ -6,26 +6,28 @@ export interface InspectionSection {
   items: string[];
 }
 
-// Section names AND item labels must match the backend report's Physical
-// Inspection taxonomy EXACTLY — the report keys each row on "Section|Label", so
-// any mismatch renders as "Not Tested" (only "Touchpad click" used to line up).
-// Item labels below are transcribed from the delivered report.
+// Section names AND item labels MUST match the backend taxonomy EXACTLY
+// (pockit-backend-pre-prod/services/HealthCheck/inspectionItems.js) — the report
+// keys each row on "Section|Label". Each item is phrased as a clear
+// "issue present?" question: Yes = finding present (stored "issue", shows a
+// remark), No = fine (stored "ok"). There is no N/T option — items the technician
+// doesn't answer are simply omitted from the report (never shown as "Not Tested").
 export const INSPECTION_SECTIONS: InspectionSection[] = [
   {
     section: "Exterior",
-    items: ["No visible damage", "Minor scratches", "Cracked casing / hinges", "Liquid damage suspected"],
+    items: ["Physical damage", "Scratches / scuffs", "Cracked casing or hinges", "Liquid damage signs"],
   },
   {
     section: "Display",
-    items: ["No visible issue", "Dead pixels", "Flickering", "Brightness issue"],
+    items: ["Screen cracks / damage", "Dead or stuck pixels", "Flickering", "Brightness problems"],
   },
   {
     section: "Keyboard & Touchpad",
-    items: ["Keys working", "Sticky / missing keys", "Touchpad click", "Gestures"],
+    items: ["Keys not working", "Sticky or missing keys", "Touchpad not working", "Gestures not working"],
   },
   {
     section: "Ports",
-    items: ["USB / USB-C", "HDMI", "Audio jack", "SD card"],
+    items: ["USB / USB-C faulty", "HDMI faulty", "Audio jack faulty", "SD card slot faulty"],
   },
 ];
 

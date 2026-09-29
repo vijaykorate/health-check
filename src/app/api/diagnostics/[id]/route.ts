@@ -59,6 +59,10 @@ export async function GET(
     createdAt: new Date().toISOString(),
     stalled: !!d.stalled,
     inspection: d.inspection ?? {},
+    remarks: d.remarks ?? {},
+    rescan: d.rescan ?? null,
+    rescanStatus: d.rescanStatus ?? null,
+    rescanAt: d.rescanAt ?? null,
     observations: d.observations ?? null,
     delivered: d.status === "completed",
     // This standalone UI is always an on-site technician visit; a truthy
