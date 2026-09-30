@@ -628,6 +628,13 @@ export function VisitWizard({
         whatsappStatus?: string | null;
       };
       if (!res.ok) {
+        // Already reviewed/submitted (the session is completed) is not a real
+        // failure — the report was already delivered. Show the completion screen
+        // instead of a red error on Review.
+        if (res.status === 409 && /already (reviewed|submitted|completed)/i.test(d.error || "")) {
+          setStage("done");
+          return;
+        }
         // Don't claim success on failure (e.g. 403 admin-consent, 409 not scanned).
         setDeliverError(d.error || "Could not submit the report. Please try again.");
         setStage("review");
@@ -809,7 +816,10 @@ export function VisitWizard({
       {stage === "scanning" ? (
         <div className="flex flex-col items-center">
           <ProgressRing percent={view.percent} label={view.stage} />
-          <p className="mt-4 max-w-md text-center text-sm text-muted">{view.message}</p>
+          <div className="mt-4 flex max-w-md items-center justify-center gap-2 text-center text-sm text-muted">
+            <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-border border-t-brand" />
+            <span>{view.message}</span>
+          </div>
           {running ? (
             <button
               onClick={onCancel}
@@ -1039,7 +1049,10 @@ export function VisitWizard({
       {stage === "rescanning" ? (
         <div className="flex flex-col items-center">
           <ProgressRing percent={view.percent} label={view.stage} />
-          <p className="mt-4 max-w-md text-center text-sm text-muted">Rescan · {view.message}</p>
+          <div className="mt-4 flex max-w-md items-center justify-center gap-2 text-center text-sm text-muted">
+            <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-border border-t-brand" />
+            <span>Rescan · {view.message}</span>
+          </div>
         </div>
       ) : null}
 
