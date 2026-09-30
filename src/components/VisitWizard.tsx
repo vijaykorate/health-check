@@ -1053,6 +1053,31 @@ export function VisitWizard({
             <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-border border-t-brand" />
             <span>Rescan · {view.message}</span>
           </div>
+          {/* Same per-category breakdown as the initial scan. We're in the rescanning
+              stage so the rescan is live — pass `true` (view.status stays 'completed'
+              during a rescan, so the `running` flag would otherwise mark all Done). */}
+          <div className="mt-8 grid w-full gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {CATEGORIES.filter((c) => !c.hideIfAbsent).map((cat) => {
+              const phase = categoryPhase(cat, view.percent, true);
+              return (
+                <div
+                  key={cat.key}
+                  className={`rounded-2xl border border-border bg-surface p-4 ${
+                    phase === "queued" ? "opacity-50" : phase === "running" ? "border-brand" : ""
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xl">{cat.icon}</span>
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                      {phase === "queued" ? "Queued" : phase === "running" ? "Running…" : "Done"}
+                    </span>
+                  </div>
+                  <div className="mt-2 font-display font-semibold text-foreground">{cat.name}</div>
+                  <div className="text-xs text-muted">{cat.detail}</div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       ) : null}
 
