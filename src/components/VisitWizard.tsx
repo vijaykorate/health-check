@@ -424,17 +424,18 @@ export function VisitWizard({
         }
         return;
       }
-      // Rescan finished → regenerate the delivered report so it includes the
-      // Rescan Result / before-after, then return to the completion screen. Also
-      // advance when still on the launcher: a rescan can finish before the UI ever
-      // caught intermediate progress, and without this it would sit on the launcher
-      // forever. The `sawRescanRunningRef` guard ignores a freshly re-armed rescan
-      // that momentarily shows a stale 'scanned'.
+      // Rescan finished → pre-build the SEPARATE rescan report (the original
+      // delivered report is never touched), then return to the completion screen.
+      // Also advance when still on the launcher: a rescan can finish before the UI
+      // ever caught intermediate progress, and without this it would sit on the
+      // launcher forever. The `sawRescanRunningRef` guard ignores a freshly
+      // re-armed rescan that momentarily shows a stale 'scanned'.
       if (
         stage === "rescanning" ||
         (stage === "rescanlaunch" && view.rescanStatus === "scanned" && sawRescanRunningRef.current)
       ) {
-        // Best-effort: rebuild the delivered PDF so it includes the rescan before/after.
+        // Best-effort: pre-build the separate rescan PDF so "View rescan report" is
+        // instant. The original completed report stays exactly as delivered.
         void fetch(`/api/diagnostics/${id}/regenerate-report`, { method: "POST" }).catch(() => {});
         setStage("done");
         return;
@@ -815,10 +816,6 @@ export function VisitWizard({
                     </div>
                   )}
 
-                  <div className="mt-6 inline-flex items-center gap-2.5 rounded-full border border-border bg-surface-2/60 px-3.5 py-1.5">
-                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-brand" />
-                    <span className="text-sm font-medium text-muted">Starting the scan… this can take a few seconds after you run the command</span>
-                  </div>
                   {noDataYet ? (
                     <p className="mt-3 max-w-xl text-sm text-muted">
                       No scan data received yet. Make sure you ran the command on the customer&rsquo;s PC
@@ -1030,10 +1027,6 @@ export function VisitWizard({
               )}
             </div>
           )}
-          <div className="mt-6 inline-flex items-center gap-2.5 rounded-full border border-border bg-surface-2/60 px-3.5 py-1.5">
-            <span className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-brand" />
-            <span className="text-sm font-medium text-muted">Starting the rescan… this can take a few seconds after you run the command</span>
-          </div>
           {noDataYet ? (
             <p className="mt-3 max-w-xl text-sm text-muted">
               No scan data received yet. Make sure you ran the command on the customer&rsquo;s PC and it
@@ -1398,12 +1391,22 @@ export function VisitWizard({
 
           {view.rescan ? (
             <div className="mt-4 rounded-xl border border-brand/30 bg-brand/5 px-4 py-3 text-sm text-foreground">
-              <span className="font-semibold">Rescan complete</span>
-              <span className="text-muted"> · Health score </span>
-              <b>{view.diagnostic?.Summary?.HealthScore ?? "—"}</b>
-              <span className="text-muted"> → </span>
-              <b>{view.rescan?.Summary?.HealthScore ?? "—"}</b>
-              <span className="text-muted"> · the report has been updated with the before/after.</span>
+              <div>
+                <span className="font-semibold">Rescan complete</span>
+                <span className="text-muted"> · Health score </span>
+                <b>{view.diagnostic?.Summary?.HealthScore ?? "—"}</b>
+                <span className="text-muted"> → </span>
+                <b>{view.rescan?.Summary?.HealthScore ?? "—"}</b>
+                <span className="text-muted"> · a separate rescan report was created (the original report is unchanged).</span>
+              </div>
+              <a
+                href={`/api/diagnostics/${id}/rescan-report`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 inline-block rounded-lg border border-brand px-3 py-1.5 text-xs font-semibold text-brand hover:bg-brand/10"
+              >
+                View rescan report
+              </a>
             </div>
           ) : null}
         </div>
