@@ -765,11 +765,8 @@ export function VisitWizard({
                   )}
 
                   <div className="mt-6 inline-flex items-center gap-2.5 rounded-full border border-border bg-surface-2/60 px-3.5 py-1.5">
-                    <span className="relative flex h-2.5 w-2.5">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand opacity-60" />
-                      <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-brand" />
-                    </span>
-                    <span className="text-sm font-medium text-muted">Waiting for the scan to start…</span>
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-brand" />
+                    <span className="text-sm font-medium text-muted">Starting the scan… this can take a few seconds after you run the command</span>
                   </div>
                 </>
               ) : (
@@ -973,11 +970,8 @@ export function VisitWizard({
             </div>
           )}
           <div className="mt-6 inline-flex items-center gap-2.5 rounded-full border border-border bg-surface-2/60 px-3.5 py-1.5">
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand opacity-60" />
-              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-brand" />
-            </span>
-            <span className="text-sm font-medium text-muted">Waiting for the rescan to start…</span>
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-brand" />
+            <span className="text-sm font-medium text-muted">Starting the rescan… this can take a few seconds after you run the command</span>
           </div>
 
           {rescanError ? <p className="mt-3 text-sm text-bad">{rescanError}</p> : null}
