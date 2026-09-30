@@ -91,13 +91,20 @@ export function CheckClient({ id }: { id: string }) {
         if (cancelled) return;
         setFetchError(null); // recovered from any prior transient error
         setView(data);
-        // Terminal session state: stop polling entirely (no reschedule).
-        if (TERMINAL_STATUSES.has(data.status)) return;
-        // Poll fast through every pre-progress wait — consent PENDING, or the scan
-        // hasn't started yet (running at 0%) — so approval and the first progress
-        // post show almost immediately. Slow to 3s only once progress is streaming.
-        const active = data.status === "running" && data.percent > 0;
-        const preScanWait = data.status === "running" && data.percent === 0;
+        // Terminal session state: stop polling — UNLESS an optional technician
+        // rescan is in progress. During a rescan the status stays 'completed' and
+        // only rescanStatus flips to 'running', so we must keep polling to receive
+        // the rescan's progress and completion; otherwise the launcher never
+        // advances ("scan never starts").
+        const rescanRunning = data.rescanStatus === "running";
+        if (TERMINAL_STATUSES.has(data.status) && !rescanRunning) return;
+        // Poll fast through every pre-progress wait — consent PENDING, the initial
+        // scan not yet started, or a rescan armed but not yet streaming — so the
+        // first progress post shows almost immediately. Slow to 3s once streaming.
+        const active =
+          (data.status === "running" || rescanRunning) && data.percent > 0;
+        const preScanWait =
+          (data.status === "running" || rescanRunning) && data.percent === 0;
         const ms =
           data.consentStatus === "PENDING" || preScanWait
             ? POLL_FAST_MS
