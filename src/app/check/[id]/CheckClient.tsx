@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import type { SessionView } from "@/lib/types";
 import { CATEGORIES, categoryPhase } from "@/lib/categories";
 import { ProgressRing } from "@/components/ProgressRing";
@@ -44,6 +45,12 @@ const PHASE_LABEL: Record<string, string> = {
 export function CheckClient({ id }: { id: string }) {
   const [view, setView] = useState<SessionView | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  // Opened for a rescan (Orders → Rescan → /check/<id>?rescan=1). The rescan is
+  // armed by the wizard AFTER the first poll, so we must keep polling even though
+  // the session is already 'completed' — otherwise the loop stops before the arm
+  // lands and the launcher never advances.
+  const searchParams = useSearchParams();
+  const rescanIntent = searchParams.get("rescan") === "1";
 
   useEffect(() => {
     // Each mount owns its own loop state. `cancelled` is this run's liveness flag,
@@ -97,14 +104,16 @@ export function CheckClient({ id }: { id: string }) {
         // the rescan's progress and completion; otherwise the launcher never
         // advances ("scan never starts").
         const rescanRunning = data.rescanStatus === "running";
-        if (TERMINAL_STATUSES.has(data.status) && !rescanRunning) return;
+        if (TERMINAL_STATUSES.has(data.status) && !rescanRunning && !rescanIntent) return;
         // Poll fast through every pre-progress wait — consent PENDING, the initial
-        // scan not yet started, or a rescan armed but not yet streaming — so the
-        // first progress post shows almost immediately. Slow to 3s once streaming.
+        // scan not yet started, a rescan armed but not yet streaming, or a rescan
+        // intent whose arm hasn't landed yet — so the first progress post (or the
+        // arm) shows almost immediately. Slow to 3s once streaming.
         const active =
           (data.status === "running" || rescanRunning) && data.percent > 0;
         const preScanWait =
-          (data.status === "running" || rescanRunning) && data.percent === 0;
+          ((data.status === "running" || rescanRunning) && data.percent === 0) ||
+          (rescanIntent && !rescanRunning && data.rescanStatus !== "scanned");
         const ms =
           data.consentStatus === "PENDING" || preScanWait
             ? POLL_FAST_MS
@@ -145,7 +154,7 @@ export function CheckClient({ id }: { id: string }) {
         document.removeEventListener("visibilitychange", onVisible);
       }
     };
-  }, [id]);
+  }, [id, rescanIntent]);
 
   const running = view?.status === "running";
   const done = view?.status === "scanned" || view?.status === "completed";
