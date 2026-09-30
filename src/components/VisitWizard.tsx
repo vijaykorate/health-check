@@ -393,8 +393,15 @@ export function VisitWizard({
       // The Health Check is completed and stays completed. The ONLY thing that runs
       // after this is the OPTIONAL technician Rescan, which never reopens the check.
       if (view.rescanStatus === "running") {
-        // Rescan armed/in-progress → drive its sub-stages; do not force "done".
-        if (anyLive && stage === "rescanlaunch") setStage("rescanning");
+        // Rescan armed/in-progress → drive its sub-stages regardless of the current
+        // stage, so a page refresh mid-rescan restores the launcher/progress instead
+        // of dropping back to the initial launch screen. Streaming → show progress;
+        // armed but not streaming yet → show the launcher.
+        if (anyLive) {
+          if (stage !== "rescanning") setStage("rescanning");
+        } else if (stage !== "rescanlaunch" && stage !== "rescanning") {
+          setStage("rescanlaunch");
+        }
         return;
       }
       // Rescan finished → regenerate the delivered report so it includes the
@@ -1300,6 +1307,16 @@ export function VisitWizard({
             </Link>
           </div>
 
+          {view.rescan ? (
+            <div className="mt-4 rounded-xl border border-brand/30 bg-brand/5 px-4 py-3 text-sm text-foreground">
+              <span className="font-semibold">Rescan complete</span>
+              <span className="text-muted"> · Health score </span>
+              <b>{view.diagnostic?.Summary?.HealthScore ?? "—"}</b>
+              <span className="text-muted"> → </span>
+              <b>{view.rescan?.Summary?.HealthScore ?? "—"}</b>
+              <span className="text-muted"> · the report has been updated with the before/after.</span>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
