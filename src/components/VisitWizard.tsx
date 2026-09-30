@@ -322,6 +322,20 @@ export function VisitWizard({
   // /check/<id>?rescan=1 — arm it automatically (no new consent needed).
   const searchParams = useSearchParams();
   const autoRescanRef = useRef(false);
+  const debug = searchParams.get("debug") === "1";
+  // Surface a hint when the launcher has been waiting a while with no scan data —
+  // usually the command was not run on the PC or was blocked (SmartScreen, etc.).
+  const [noDataYet, setNoDataYet] = useState(false);
+  useEffect(() => {
+    // Only arm the timer on the launcher stages while no progress has arrived.
+    // The cleanup resets the flag whenever the stage advances or progress starts.
+    if (!((stage === "launch" || stage === "rescanlaunch") && view.percent === 0)) return;
+    const t = setTimeout(() => setNoDataYet(true), 30000);
+    return () => {
+      clearTimeout(t);
+      setNoDataYet(false);
+    };
+  }, [stage, view.percent]);
 
   const [launch, setLaunch] = useState<LaunchInfo | null>(null);
   const [deliverResult, setDeliverResult] = useState<{
@@ -688,6 +702,13 @@ export function VisitWizard({
         </div>
       ) : null}
 
+      {debug ? (
+        <p className="mb-4 text-center text-[11px] text-muted">
+          debug · status={String(view.status)} · rescanStatus={String(view.rescanStatus)} · percent=
+          {view.percent} · stage={stage}
+        </p>
+      ) : null}
+
       {/* 0 · Launch */}
       {stage === "launch" ? (
         <div>
@@ -782,6 +803,13 @@ export function VisitWizard({
                     <span className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-brand" />
                     <span className="text-sm font-medium text-muted">Starting the scan… this can take a few seconds after you run the command</span>
                   </div>
+                  {noDataYet ? (
+                    <p className="mt-3 max-w-xl text-sm text-muted">
+                      No scan data received yet. Make sure you ran the command on the customer&rsquo;s PC
+                      and it was not blocked (SmartScreen, or &ldquo;running scripts is disabled&rdquo;).
+                      It advances automatically once the scan starts.
+                    </p>
+                  ) : null}
                 </>
               ) : (
                 <div className="mt-5 card p-6">
@@ -990,6 +1018,13 @@ export function VisitWizard({
             <span className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-brand" />
             <span className="text-sm font-medium text-muted">Starting the rescan… this can take a few seconds after you run the command</span>
           </div>
+          {noDataYet ? (
+            <p className="mt-3 max-w-xl text-sm text-muted">
+              No scan data received yet. Make sure you ran the command on the customer&rsquo;s PC and it
+              was not blocked (SmartScreen, or &ldquo;running scripts is disabled&rdquo;). It advances
+              automatically once the rescan starts.
+            </p>
+          ) : null}
 
           {rescanError ? <p className="mt-3 text-sm text-bad">{rescanError}</p> : null}
 
