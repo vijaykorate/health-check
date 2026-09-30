@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import type { InspectionStatus, Severity, SessionView } from "@/lib/types";
 import { CATEGORIES, categoryPhase } from "@/lib/categories";
 import { INSPECTION_SECTIONS, inspectionKey } from "@/lib/inspection";
@@ -317,6 +318,10 @@ export function VisitWizard({
 }) {
   const [stage, setStage] = useState<Stage>("launch");
   const [busy, setBusy] = useState(false);
+  // Rescan can be launched from the Orders list on a completed card via
+  // /check/<id>?rescan=1 — arm it automatically (no new consent needed).
+  const searchParams = useSearchParams();
+  const autoRescanRef = useRef(false);
 
   const [launch, setLaunch] = useState<LaunchInfo | null>(null);
   const [deliverResult, setDeliverResult] = useState<{
@@ -363,7 +368,11 @@ export function VisitWizard({
 
   // Fetch the backend-generated launcher commands (relayed by the BFF).
   useEffect(() => {
-    if (stage !== "launch" || launch || !scanUnlocked) return;
+    // Fetch the launcher command for the initial scan AND the post-completion
+    // rescan launcher — otherwise a re-opened completed order (which never passes
+    // through the "launch" stage) leaves `launch` null and the rescan hangs on
+    // "Preparing command…".
+    if ((stage !== "launch" && stage !== "rescanlaunch") || launch || !scanUnlocked) return;
     fetch(`/api/diagnostics/${id}/launch`)
       .then((r) => r.json())
       .then((d) => setLaunch(d as LaunchInfo))
@@ -388,8 +397,11 @@ export function VisitWizard({
         if (anyLive && stage === "rescanlaunch") setStage("rescanning");
         return;
       }
-      // Rescan finished → return to the completion screen (it shows the result).
+      // Rescan finished → regenerate the delivered report so it includes the
+      // Rescan Result / before-after, then return to the completion screen.
       if (stage === "rescanning") {
+        // Best-effort: rebuild the delivered PDF so it includes the rescan before/after.
+        void fetch(`/api/diagnostics/${id}/regenerate-report`, { method: "POST" }).catch(() => {});
         setStage("done");
         return;
       }
@@ -407,7 +419,7 @@ export function VisitWizard({
       if (stage === "launch" || stage === "connecting") setStage("scanning");
       else if (stage === "scanning") setStage("inspection");
     }
-  }, [view.status, view.percent, view.stage, view.rescanStatus, scanUnlocked, stage]);
+  }, [view.status, view.percent, view.stage, view.rescanStatus, scanUnlocked, stage, id]);
 
   const checks = view.diagnostic?.Checks ?? [];
   const summary = view.diagnostic?.Summary;
@@ -501,15 +513,33 @@ export function VisitWizard({
     }
   }
 
-  // After a rescan completes, refresh the downloadable PDF so it includes the
-  // Rescan Result section (does not change the original completed result).
-  async function regenerateReport() {
-    setBusy(true);
-    try {
-      await fetch(`/api/diagnostics/${id}/regenerate-report`, { method: "POST" });
-    } finally {
-      setBusy(false);
-    }
+  // Auto-arm the rescan when opened from the Orders list (/check/<id>?rescan=1).
+  // Fires once, only on an already-completed session that isn't mid-rescan. No new
+  // customer consent is requested — the session is already APPROVED (backend also
+  // enforces this in start-rescan).
+  useEffect(() => {
+    if (autoRescanRef.current) return;
+    if (searchParams.get("rescan") !== "1") return;
+    if (view.status !== "completed" || view.rescanStatus === "running") return;
+    autoRescanRef.current = true;
+    // Intentional URL-triggered action; startRescan is a stable declaration.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void startRescan();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, view.status, view.rescanStatus]);
+
+  // Persist the current fixes/actions to the session envelope. Called from the
+  // rescan launcher (on blur) so notes entered there reach the regenerated
+  // report's before/after — the backend preserves fixes across the rescan write.
+  async function saveFixes(list: { action: string; note: string }[] = fixes) {
+    const clean = list
+      .map((f) => ({ action: f.action.trim(), note: f.note.trim() }))
+      .filter((f) => f.action || f.note);
+    await fetch(`/api/diagnostics/${id}/fixes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fixes: clean }),
+    }).catch(() => {});
   }
 
   async function draftWithAi() {
@@ -949,6 +979,58 @@ export function VisitWizard({
             </span>
             <span className="text-sm font-medium text-muted">Waiting for the rescan to start…</span>
           </div>
+
+          {rescanError ? <p className="mt-3 text-sm text-bad">{rescanError}</p> : null}
+
+          {/* Fixes / actions taken — saved to the session; shown in the report's before/after. */}
+          <div className="mt-6 max-w-xl rounded-2xl border border-border bg-surface p-4">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-bold uppercase tracking-wide text-muted">Fixes / actions taken (optional)</div>
+              <button
+                onClick={() => setFixes((s) => [...s, { action: "", note: "" }])}
+                className="rounded-lg border border-brand px-2.5 py-1 text-xs font-semibold text-brand hover:bg-brand/10"
+              >
+                + Add
+              </button>
+            </div>
+            <div className="mt-2 flex flex-col gap-2">
+              {fixes.map((f, i) => (
+                <div key={i} className="flex gap-2">
+                  <input
+                    value={f.action}
+                    onChange={(e) => setFixes((s) => s.map((x, j) => (j === i ? { ...x, action: e.target.value } : x)))}
+                    onBlur={() => void saveFixes()}
+                    placeholder="Action (e.g. Driver update)"
+                    className="w-1/3 rounded-lg border border-border bg-surface p-2 text-sm text-foreground"
+                  />
+                  <input
+                    value={f.note}
+                    onChange={(e) => setFixes((s) => s.map((x, j) => (j === i ? { ...x, note: e.target.value } : x)))}
+                    onBlur={() => void saveFixes()}
+                    placeholder="What was done / observed"
+                    className="flex-1 rounded-lg border border-border bg-surface p-2 text-sm text-foreground"
+                  />
+                  {fixes.length > 1 ? (
+                    <button
+                      onClick={() =>
+                        setFixes((s) => {
+                          const next = s.filter((_, j) => j !== i);
+                          void saveFixes(next);
+                          return next;
+                        })
+                      }
+                      className="rounded-lg border border-border px-2 text-sm text-muted hover:border-bad hover:text-bad"
+                    >
+                      ×
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+            <p className="mt-1 text-[11px] text-muted">
+              Record what you fixed before rescanning; it appears in the report&rsquo;s before/after.
+            </p>
+          </div>
         </div>
       ) : null}
 
@@ -1022,15 +1104,22 @@ export function VisitWizard({
 
             <label className="mt-4 block text-xs font-semibold text-muted">Recommendation</label>
             <div className="mt-1 flex flex-wrap gap-1.5">
-              {QUICK_RECOMMENDATIONS.map((r) => (
-                <button
-                  key={r}
-                  onClick={() => setRecommendation(r)}
-                  className="rounded-full border border-border px-2.5 py-0.5 text-xs text-muted hover:border-brand hover:text-brand"
-                >
-                  {r}
-                </button>
-              ))}
+              {QUICK_RECOMMENDATIONS.map((r) => {
+                const active = recommendation === r;
+                return (
+                  <button
+                    key={r}
+                    onClick={() => setRecommendation(active ? "" : r)}
+                    className={`rounded-full px-2.5 py-0.5 text-xs ${
+                      active
+                        ? "border border-brand bg-brand text-white"
+                        : "border border-border text-muted hover:border-brand hover:text-brand"
+                    }`}
+                  >
+                    {r}
+                  </button>
+                );
+              })}
             </div>
             <textarea
               value={recommendation}
@@ -1217,95 +1306,6 @@ export function VisitWizard({
             </Link>
           </div>
 
-          {/* Optional technician-only Rescan — never changes the completed result. */}
-          <div className="mt-5 rounded-xl border border-border bg-surface p-4 text-foreground">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="font-display font-semibold">Optional rescan</div>
-                <div className="text-xs text-muted">
-                  Re-run the diagnostic (technician only). The original result stays unchanged;
-                  no new customer consent is needed.
-                </div>
-              </div>
-              <button
-                onClick={startRescan}
-                disabled={busy}
-                className="rounded-xl border border-brand px-4 py-2 text-sm font-semibold text-brand hover:bg-brand/10 disabled:opacity-60"
-              >
-                {busy ? "Starting…" : view.rescan ? "Run rescan again" : "Rescan"}
-              </button>
-            </div>
-
-            {/* Fixes / actions performed before the rescan (shown in the report). */}
-            <div className="mt-3 border-t border-border pt-3">
-              <div className="flex items-center justify-between">
-                <div className="text-xs font-bold uppercase tracking-wide text-muted">Fixes / actions taken (optional)</div>
-                <button
-                  onClick={() => setFixes((s) => [...s, { action: "", note: "" }])}
-                  className="rounded-lg border border-brand px-2.5 py-1 text-xs font-semibold text-brand hover:bg-brand/10"
-                >
-                  + Add
-                </button>
-              </div>
-              <div className="mt-2 flex flex-col gap-2">
-                {fixes.map((f, i) => (
-                  <div key={i} className="flex gap-2">
-                    <input
-                      value={f.action}
-                      onChange={(e) => setFixes((s) => s.map((x, j) => (j === i ? { ...x, action: e.target.value } : x)))}
-                      placeholder="Action (e.g. Driver update)"
-                      className="w-1/3 rounded-lg border border-border bg-surface p-2 text-sm text-foreground"
-                    />
-                    <input
-                      value={f.note}
-                      onChange={(e) => setFixes((s) => s.map((x, j) => (j === i ? { ...x, note: e.target.value } : x)))}
-                      placeholder="What was done / observed"
-                      className="flex-1 rounded-lg border border-border bg-surface p-2 text-sm text-foreground"
-                    />
-                    {fixes.length > 1 ? (
-                      <button
-                        onClick={() => setFixes((s) => s.filter((_, j) => j !== i))}
-                        className="rounded-lg border border-border px-2 text-sm text-muted hover:border-bad hover:text-bad"
-                      >
-                        ×
-                      </button>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-              <p className="mt-1 text-[11px] text-muted">
-                Record what you fixed before rescanning; it appears in the report&rsquo;s before/after.
-              </p>
-            </div>
-
-            {rescanError ? <p className="mt-2 text-sm text-bad">{rescanError}</p> : null}
-            {view.rescan ? (
-              <div className="mt-3 border-t border-border pt-3">
-                <div className="text-xs font-bold uppercase tracking-wide text-muted">Latest rescan result</div>
-                <div className="mt-1 flex flex-wrap gap-x-6 gap-y-1 text-sm">
-                  <span className="text-muted">
-                    Health score:{" "}
-                    <b className="text-foreground">{view.diagnostic?.Summary?.HealthScore ?? "—"}</b>
-                    <span className="text-muted"> → </span>
-                    <b className="text-foreground">{view.rescan?.Summary?.HealthScore ?? "—"}</b>
-                  </span>
-                  <span className="text-muted">
-                    Status:{" "}
-                    <b className="text-foreground">{view.diagnostic?.Summary?.OverallStatus ?? "—"}</b>
-                    <span className="text-muted"> → </span>
-                    <b className="text-foreground">{view.rescan?.Summary?.OverallStatus ?? "—"}</b>
-                  </span>
-                </div>
-                <button
-                  onClick={regenerateReport}
-                  disabled={busy}
-                  className="mt-3 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted hover:border-brand hover:text-brand disabled:opacity-60"
-                >
-                  {busy ? "Updating…" : "Update report with rescan"}
-                </button>
-              </div>
-            ) : null}
-          </div>
         </div>
       ) : null}
     </div>

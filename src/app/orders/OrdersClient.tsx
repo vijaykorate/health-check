@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { scoreTone } from "@/lib/score";
 import { toneClasses } from "@/lib/ui";
 import { SignOutButton } from "@/components/SignOutButton";
@@ -22,6 +23,7 @@ interface OrderRow {
 }
 
 function OrderCard({ o }: { o: OrderRow }) {
+  const router = useRouter();
   const href =
     o.state === "open"
       ? `/orders/${o.orderId}`
@@ -59,15 +61,38 @@ function OrderCard({ o }: { o: OrderRow }) {
       </div>
       <div className="flex items-center justify-between">
         <span className="text-xs text-muted">{o.serviceType}</span>
-        <span className="text-xs font-medium text-brand">
-          {o.state === "open"
-            ? o.started
-              ? "Start →"
-              : "Awaiting job start"
-            : o.state === "in_progress"
-              ? "Resume →"
-              : "View report →"}
-        </span>
+        <div className="flex items-center gap-3">
+          {o.state === "completed" && o.sessionId ? (
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                router.push(`/check/${o.sessionId}?rescan=1`);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  router.push(`/check/${o.sessionId}?rescan=1`);
+                }
+              }}
+              className="cursor-pointer text-xs font-semibold text-brand underline-offset-2 hover:underline"
+            >
+              Rescan
+            </span>
+          ) : null}
+          <span className="text-xs font-medium text-brand">
+            {o.state === "open"
+              ? o.started
+                ? "Start →"
+                : "Awaiting job start"
+              : o.state === "in_progress"
+                ? "Resume →"
+                : "View report →"}
+          </span>
+        </div>
       </div>
     </Link>
   );
