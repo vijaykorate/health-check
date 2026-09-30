@@ -182,7 +182,7 @@ Progress 8 "system" "$($cs.Manufacturer) $($cs.Model) - $($os.Caption)"
 
 Log "[1/7] Performance"
 $cpuS=@();$memS=@()
-1..10|%{$p=Safe "CPU sample" {(Get-CimInstance Win32_Processor|Measure LoadPercentage -Average).Average};$m=Safe "RAM sample" {Get-CimInstance Win32_OperatingSystem};if($null-ne$p){$cpuS+=[double]$p};if($m-and$m.TotalVisibleMemorySize){$memS+=(1-($m.FreePhysicalMemory/$m.TotalVisibleMemorySize))*100};if($_-eq3-or$_-eq6){Progress (8+$_) "performance" "Sampling CPU & memory ($_/10)…"};if($_-lt10){Start-Sleep 1}}
+1..10|%{$p=Safe "CPU sample" {(Get-CimInstance Win32_Processor|Measure LoadPercentage -Average).Average};$m=Safe "RAM sample" {Get-CimInstance Win32_OperatingSystem};if($null-ne$p){$cpuS+=[double]$p};if($m-and$m.TotalVisibleMemorySize){$memS+=(1-($m.FreePhysicalMemory/$m.TotalVisibleMemorySize))*100};if($_-eq3-or$_-eq6){Progress (8+$_) "performance" "Sampling CPU & memory ($_/10)..."};if($_-lt10){Start-Sleep 1}}
 $cpuAvg=if($cpuS){[math]::Round(($cpuS|Measure -Average).Average,1)}else{$null};$cpuMax=if($cpuS){[math]::Round(($cpuS|Measure -Maximum).Maximum,1)}else{$null}
 $memAvg=if($memS){[math]::Round(($memS|Measure -Average).Average,1)}else{$null};$memMax=if($memS){[math]::Round(($memS|Measure -Maximum).Maximum,1)}else{$null}
 $perf="Good";if(($cpuMax-ge95)-or($memMax-ge95)){$perf="Attention"}elseif(($cpuAvg-ge80)-or($memAvg-ge85)){$perf="Watch"}
