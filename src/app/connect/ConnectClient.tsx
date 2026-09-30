@@ -99,7 +99,7 @@ export function ConnectClient() {
       <div className="rounded-2xl border border-ok/40 bg-ok-bg p-4 text-ok">
         <div className="font-display font-semibold">Connected ✓</div>
         <p className="mt-1 text-sm">
-          You&rsquo;re connected{tech?.technicianName ? ` — technician ${tech.technicianName}` : ""}.
+          You are connected{tech?.technicianName ? ` — technician ${tech.technicianName}` : ""}.
           {tech?.device ? ` Device: ${tech.device}.` : ""}
         </p>
       </div>

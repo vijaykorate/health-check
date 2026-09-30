@@ -62,7 +62,7 @@ export async function hcBackend<T = Record<string, unknown>>(
       httpStatus: 502,
       ok: false,
       status: 502,
-      message: "Couldn't reach the server. Please try again.",
+      message: "Could not reach the server. Please try again.",
       data: {} as T,
     };
   }

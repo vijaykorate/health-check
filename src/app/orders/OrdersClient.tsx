@@ -158,7 +158,7 @@ export function OrdersClient({ technicianName }: { technicianName: string }) {
 
       <h1 className="mt-6 font-display text-2xl font-bold text-foreground">Your visits</h1>
       <p className="mt-2 text-sm text-muted">
-        Pick the order you&rsquo;re on-site for. You&rsquo;ll confirm the customer&rsquo;s consent
+        Pick the order you are on-site for. You will confirm the customer&rsquo;s consent
         code before the scan starts.
       </p>
 

@@ -21,10 +21,10 @@ export function StartHealthCheck({ orderId }: { orderId: string }) {
           }
           throw new Error(
             d.error === "not_found"
-              ? "This health-check order isn't assigned to you (or is no longer open)."
+              ? "This health-check order is not assigned to you (or is no longer open)."
               : // Surface the backend's real reason (e.g. "Start the job before
                 // starting a Health Check.") instead of a generic message.
-                d.error || "Couldn't start the health check. Please try again.",
+                d.error || "Could not start the health check. Please try again.",
           );
         }
         const d = (await res.json()) as { url: string };
@@ -42,7 +42,7 @@ export function StartHealthCheck({ orderId }: { orderId: string }) {
     <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center px-6 py-20 text-center">
       {error ? (
         <div className="rounded-2xl border border-bad/40 bg-bad-bg p-6 text-bad">
-          <div className="font-display font-semibold">Couldn&rsquo;t open the health check</div>
+          <div className="font-display font-semibold">Could not open the health check</div>
           <p className="mt-1 text-sm">{error}</p>
           <Link
             href="/orders"

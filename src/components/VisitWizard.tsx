@@ -260,7 +260,7 @@ function CustomerConsentPanel({ id, status }: { id: string; status: string | nul
         <div>
           <div className="font-display font-semibold text-foreground">Customer consent</div>
           <div className="text-xs text-muted">
-            Send the request; the customer approves in their Pockit app before the scan.
+            Send the request; the customer approves it before the scan.
           </div>
         </div>
         <span className="ml-auto">
@@ -288,12 +288,12 @@ function CustomerConsentPanel({ id, status }: { id: string; status: string | nul
               : busy
                 ? "Sending…"
                 : waiting
-                  ? "Resend consent request"
-                  : "Send consent to customer"}
+                  ? "Resend consent request to customer"
+                  : "Send consent request to customer"}
           </button>
           {waiting && !rejected ? (
             <p className="mt-3 text-sm text-muted">
-              Sent — waiting for the customer to Approve or Decline in their Pockit app.
+              Sent — waiting for the customer to Approve or Decline.
             </p>
           ) : rejected ? (
             <p className="mt-3 text-sm text-muted">
@@ -548,7 +548,7 @@ export function VisitWizard({
     try {
       const res = await fetch(`/api/diagnostics/${id}/ai-draft`, { method: "POST" });
       if (!res.ok) {
-        setAiError("AI couldn't draft suggestions — fill the fields manually.");
+        setAiError("AI could not draft suggestions — fill the fields manually.");
         return;
       }
       const draft = (await res.json()) as AiDraft;
@@ -584,12 +584,12 @@ export function VisitWizard({
       if (!filledAny) {
         setAiError(
           draft.aiConfigured === false
-            ? "AI drafting isn't configured — fill the fields manually."
-            : "AI couldn't draft suggestions — fill the fields manually.",
+            ? "AI drafting is not configured — fill the fields manually."
+            : "AI could not draft suggestions — fill the fields manually.",
         );
       }
     } catch {
-      setAiError("AI couldn't draft suggestions — fill the fields manually.");
+      setAiError("AI could not draft suggestions — fill the fields manually.");
     } finally {
       setAiLoading(false);
     }
@@ -622,7 +622,7 @@ export function VisitWizard({
       };
       if (!res.ok) {
         // Don't claim success on failure (e.g. 403 admin-consent, 409 not scanned).
-        setDeliverError(d.error || "Couldn't submit the report. Please try again.");
+        setDeliverError(d.error || "Could not submit the report. Please try again.");
         setStage("review");
         return;
       }
@@ -633,7 +633,7 @@ export function VisitWizard({
       });
       setStage("done");
     } catch {
-      setDeliverError("Couldn't submit the report. Please try again.");
+      setDeliverError("Could not submit the report. Please try again.");
       setStage("review");
     } finally {
       setBusy(false);
@@ -752,12 +752,12 @@ export function VisitWizard({
                         </a>
                         {os === "windows" ? (
                           <p className="mt-2.5 text-xs text-muted">
-                            Windows may ask you to confirm once, since it&rsquo;s a downloaded file. If
+                            Windows may ask you to confirm once, since it is a downloaded file. If
                             it says <b>&ldquo;Smart App Control blocked a file&rdquo;</b> with no
                             &ldquo;Run anyway&rdquo;, turn <b>Smart App Control</b> off on that PC
                             (Settings → Privacy &amp; security → Windows Security → App &amp; browser
                             control → Smart App Control → Off), or use the <b>PowerShell command
-                            above</b> — it isn&rsquo;t a downloaded file, so it runs regardless.
+                            above</b> — it is not a downloaded file, so it runs regardless.
                           </p>
                         ) : null}
                       </div>
@@ -776,7 +776,7 @@ export function VisitWizard({
                 <div className="mt-5 card p-6">
                   <div className="font-display font-semibold text-foreground">Waiting for customer consent</div>
                   <p className="mt-1 text-sm text-muted">
-                    The scan commands appear here once the customer approves in their Pockit app.
+                    The scan commands appear here once the customer approves.
                   </p>
                 </div>
               )}

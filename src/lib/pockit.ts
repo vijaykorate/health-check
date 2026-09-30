@@ -133,7 +133,7 @@ export async function sendTechnicianOtp(
     if (json?.code === 200) return { ok: true };
     return { ok: false, message: json?.message ?? "Could not send OTP." };
   } catch {
-    return { ok: false, message: "Couldn't reach the Pockit server." };
+    return { ok: false, message: "Could not reach the Pockit server." };
   }
 }
 
@@ -239,6 +239,6 @@ export async function verifyTechnicianOtp(
     }
     return { ok: false, message: json?.message ?? "Invalid or expired OTP." };
   } catch {
-    return { ok: false, message: "Couldn't reach the Pockit server." };
+    return { ok: false, message: "Could not reach the Pockit server." };
   }
 }
