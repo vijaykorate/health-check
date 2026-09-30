@@ -322,6 +322,11 @@ export function VisitWizard({
   // /check/<id>?rescan=1 — arm it automatically (no new consent needed).
   const searchParams = useSearchParams();
   const autoRescanRef = useRef(false);
+  // True once we've observed the current rescan actually running. Lets us advance a
+  // finished rescan (rescanStatus 'scanned') off the launcher even if the UI never
+  // caught intermediate progress — while ignoring a freshly re-armed rescan that
+  // momentarily shows a stale 'scanned'.
+  const sawRescanRunningRef = useRef(false);
   const debug = searchParams.get("debug") === "1";
   // Surface a hint when the launcher has been waiting a while with no scan data —
   // usually the command was not run on the PC or was blocked (SmartScreen, etc.).
@@ -411,6 +416,7 @@ export function VisitWizard({
         // stage, so a page refresh mid-rescan restores the launcher/progress instead
         // of dropping back to the initial launch screen. Streaming → show progress;
         // armed but not streaming yet → show the launcher.
+        sawRescanRunningRef.current = true;
         if (anyLive) {
           if (stage !== "rescanning") setStage("rescanning");
         } else if (stage !== "rescanlaunch" && stage !== "rescanning") {
@@ -419,8 +425,15 @@ export function VisitWizard({
         return;
       }
       // Rescan finished → regenerate the delivered report so it includes the
-      // Rescan Result / before-after, then return to the completion screen.
-      if (stage === "rescanning") {
+      // Rescan Result / before-after, then return to the completion screen. Also
+      // advance when still on the launcher: a rescan can finish before the UI ever
+      // caught intermediate progress, and without this it would sit on the launcher
+      // forever. The `sawRescanRunningRef` guard ignores a freshly re-armed rescan
+      // that momentarily shows a stale 'scanned'.
+      if (
+        stage === "rescanning" ||
+        (stage === "rescanlaunch" && view.rescanStatus === "scanned" && sawRescanRunningRef.current)
+      ) {
         // Best-effort: rebuild the delivered PDF so it includes the rescan before/after.
         void fetch(`/api/diagnostics/${id}/regenerate-report`, { method: "POST" }).catch(() => {});
         setStage("done");
@@ -507,6 +520,9 @@ export function VisitWizard({
   async function startRescan() {
     setBusy(true);
     setRescanError(null);
+    // New rescan: forget any prior "saw running" so a stale 'scanned' from a previous
+    // rescan doesn't immediately bounce this fresh one to the done screen.
+    sawRescanRunningRef.current = false;
     try {
       // Persist the technician's fixes/actions first (best-effort — a rescan can
       // still proceed if none were recorded).
