@@ -126,8 +126,11 @@ export interface TechnicianFindings {
 }
 
 /** Physical inspection result per item (keyed "Section|Label"). */
-export type InspectionStatus = "ok" | "issue" | "na";
+export type InspectionStatus = "ok" | "issue";
 export type Inspection = Record<string, InspectionStatus>;
+/** Free-text remark per inspection item (keyed "Section|Label"), captured when
+ *  an item is flagged as an issue. */
+export type InspectionRemarks = Record<string, string>;
 
 /**
  * Internal session record (camelCase — this is ours, not the engine's).
@@ -191,6 +194,14 @@ export interface SessionView {
   /** True when a running scan has exceeded the stalled threshold (feature 5). */
   stalled: boolean;
   inspection: Inspection;
+  /** Per-item technician remarks keyed "Section|Label" (only for flagged items). */
+  remarks?: Record<string, string>;
+  /** Optional Rescan (technician-only, after completion). Null/absent otherwise. */
+  rescan?: DiagnosticReport | null;
+  rescanStatus?: "running" | "scanned" | string | null;
+  rescanAt?: string | null;
+  /** Technician fixes/actions performed between the original scan and the rescan. */
+  fixes?: Array<{ action?: string; note?: string }>;
   observations: string | null;
   delivered: boolean;
   orderId: string | null;

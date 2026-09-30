@@ -1,5 +1,7 @@
-// POST /api/diagnostics/[id]/inspection — BFF proxy to backend
-// `POST /api/diagnostics/:id/physical-findings` (wizard.postPhysicalFindings).
+// POST /api/diagnostics/[id]/fixes — BFF proxy to backend
+// `POST /api/diagnostics/:id/fixes` (wizard.postFixes): records the technician's
+// fixes/actions performed between the original scan and the rescan (post-scan).
+// Stored in the INSPECTION_JSON envelope; shown in the report's Fixes section.
 import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/session-auth";
 import { hcBackend } from "@/lib/pockit-hc";
@@ -13,29 +15,20 @@ export async function POST(
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
-  let body: {
-    inspection?: unknown;
-    observations?: string | null;
-    // Per-item remarks keyed "Section|Label", captured for flagged items.
-    remarks?: Record<string, string>;
-  } = {};
+  let body: { fixes?: Array<{ action?: string; note?: string }> } = {};
   try {
     body = await request.json();
   } catch {
     /* empty body ok */
   }
-  const r = await hcBackend(`api/diagnostics/${encodeURIComponent(id)}/physical-findings`, {
+  const r = await hcBackend(`api/diagnostics/${encodeURIComponent(id)}/fixes`, {
     method: "POST",
     token: me.pockitToken,
-    body: {
-      inspection: body.inspection ?? {},
-      observations: body.observations ?? null,
-      remarks: body.remarks ?? {},
-    },
+    body: { fixes: Array.isArray(body.fixes) ? body.fixes : [] },
   });
   if (!r.ok) {
     return NextResponse.json(
-      { error: r.message ?? "Failed to save physical findings." },
+      { error: r.message ?? "Failed to save fixes." },
       { status: r.status >= 400 ? r.status : 500 },
     );
   }

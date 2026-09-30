@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import type { InspectionStatus, Severity, SessionView } from "@/lib/types";
 import { CATEGORIES, categoryPhase } from "@/lib/categories";
 import { INSPECTION_SECTIONS, inspectionKey } from "@/lib/inspection";
@@ -20,7 +21,10 @@ type Stage =
   | "findings"
   | "review"
   | "generating"
-  | "done";
+  | "done"
+  // Optional post-completion Rescan (technician-only) — not part of the main flow.
+  | "rescanlaunch"
+  | "rescanning";
 
 const FLOW: { key: Stage; label: string }[] = [
   { key: "launch", label: "Launch" },
@@ -36,7 +40,7 @@ function Stepper({ stage }: { stage: Stage }) {
   const idxOf = (s: Stage) =>
     s === "connecting"
       ? order.indexOf("scanning")
-      : s === "generating"
+      : s === "generating" || s === "rescanlaunch" || s === "rescanning"
         ? order.indexOf("done")
         : order.indexOf(s);
   const cur = idxOf(stage);
@@ -92,6 +96,7 @@ interface DraftCase {
 }
 interface AiDraft {
   finding: string | null;
+  severity: string | null;
   diagnosis: string | null;
   recommendation: string | null;
   similarCases: DraftCase[];
@@ -169,6 +174,36 @@ function CommandLabel({ children }: { children: ReactNode }) {
   return <span className="text-[11px] font-bold uppercase tracking-wider text-muted">{children}</span>;
 }
 
+// Remark input shown under an inspection item once it's flagged as an issue.
+// Required when visible — `error` highlights it if the technician tries to
+// continue without filling it in.
+function RemarkField({
+  value,
+  onChange,
+  error,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  error?: boolean;
+}) {
+  return (
+    <div className="mt-1.5">
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Remark — describe the issue"
+        className={`w-full rounded-lg border bg-surface p-2 text-sm text-foreground ${
+          error ? "border-bad" : "border-border"
+        }`}
+      />
+      {error ? (
+        <p className="mt-1 text-xs text-bad">Please add a remark for this issue.</p>
+      ) : null}
+    </div>
+  );
+}
+
 // (Removed) Technician Health Check shift-OTP gate ("Verify your shift"): the
 // launch flow no longer requires a technician one-time code. The scan is
 // authorized by the customer connecting + an admin approving consent (Approve/Deny).
@@ -182,11 +217,17 @@ function CommandLabel({ children }: { children: ReactNode }) {
 function CustomerConsentPanel({ id, status }: { id: string; status: string | null }) {
   const approved = status === "APPROVED";
   const rejected = status === "REJECTED";
+  // Persisted "waiting" state: the backend keeps CONSENT_STATUS='PENDING' from the
+  // moment the request is raised until the customer decides, so deriving from the
+  // status (not just local React state) means a page refresh still shows "Waiting"
+  // instead of falling back to "Send consent".
+  const pending = status === "PENDING";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Did the technician send in THIS view? Drives "Send" → "Resend" and the
-  // "waiting" state — so it always starts as "Send" until they tap it.
+  // Optimistic flag for the moment right after clicking Send, before the next poll
+  // reflects PENDING. The persistent waiting state comes from `pending` above.
   const [hasSent, setHasSent] = useState(false);
+  const waiting = hasSent || pending;
   // 10-second cooldown between sends so the customer isn't spammed.
   const [cooldown, setCooldown] = useState(0);
   useEffect(() => {
@@ -227,7 +268,7 @@ function CustomerConsentPanel({ id, status }: { id: string; status: string | nul
             <span className="rounded-full bg-ok-bg px-3 py-1 text-xs font-semibold text-ok">Approved ✓</span>
           ) : rejected ? (
             <span className="rounded-full bg-bad-bg px-3 py-1 text-xs font-semibold text-bad">Declined</span>
-          ) : hasSent ? (
+          ) : waiting ? (
             <span className="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-xs font-semibold text-muted">
               <span className="h-2 w-2 animate-pulse rounded-full bg-brand" />
               Waiting for customer…
@@ -246,11 +287,11 @@ function CustomerConsentPanel({ id, status }: { id: string; status: string | nul
               ? `Resend in ${cooldown}s`
               : busy
                 ? "Sending…"
-                : hasSent
+                : waiting
                   ? "Resend consent request"
                   : "Send consent to customer"}
           </button>
-          {hasSent && !rejected ? (
+          {waiting && !rejected ? (
             <p className="mt-3 text-sm text-muted">
               Sent — waiting for the customer to Approve or Decline in their Pockit app.
             </p>
@@ -277,6 +318,10 @@ export function VisitWizard({
 }) {
   const [stage, setStage] = useState<Stage>("launch");
   const [busy, setBusy] = useState(false);
+  // Rescan can be launched from the Orders list on a completed card via
+  // /check/<id>?rescan=1 — arm it automatically (no new consent needed).
+  const searchParams = useSearchParams();
+  const autoRescanRef = useRef(false);
 
   const [launch, setLaunch] = useState<LaunchInfo | null>(null);
   const [deliverResult, setDeliverResult] = useState<{
@@ -287,7 +332,17 @@ export function VisitWizard({
   const [deliverError, setDeliverError] = useState<string | null>(null);
   const [os, setOs] = useState<"windows" | "mac">("windows");
 
-  const [inspection, setInspection] = useState<Record<string, InspectionStatus>>({});
+  // Seed from the persisted backend state so a page refresh mid-visit restores
+  // the technician's answers/remarks instead of clearing them.
+  const [inspection, setInspection] = useState<Record<string, InspectionStatus>>(
+    () => view.inspection ?? {},
+  );
+  // Free-text remark per item, captured only when an item is flagged "issue"
+  // (keyed the same "Section|Label" as `inspection`).
+  const [remarks, setRemarks] = useState<Record<string, string>>(() => view.remarks ?? {});
+  // Keys of flagged items still missing a required remark — set on a blocked
+  // Continue so those inputs can highlight.
+  const [remarkErrors, setRemarkErrors] = useState<Set<string>>(new Set());
   const [observations, setObservations] = useState("");
 
   const [primaryFinding, setPrimaryFinding] = useState("");
@@ -296,6 +351,10 @@ export function VisitWizard({
   const [recommendation, setRecommendation] = useState("");
   const [ai, setAi] = useState<AiDraft | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  // Guards the one-shot auto-draft when the technician first reaches Findings.
+  // A ref (not state) so flipping it doesn't itself trigger a render/effect.
+  const autoDraftedRef = useRef(false);
 
   const running = view.status === "running";
   const scanDone = view.status === "scanned" || view.status === "completed";
@@ -309,7 +368,11 @@ export function VisitWizard({
 
   // Fetch the backend-generated launcher commands (relayed by the BFF).
   useEffect(() => {
-    if (stage !== "launch" || launch || !scanUnlocked) return;
+    // Fetch the launcher command for the initial scan AND the post-completion
+    // rescan launcher — otherwise a re-opened completed order (which never passes
+    // through the "launch" stage) leaves `launch` null and the rescan hangs on
+    // "Preparing command…".
+    if ((stage !== "launch" && stage !== "rescanlaunch") || launch || !scanUnlocked) return;
     fetch(`/api/diagnostics/${id}/launch`)
       .then((r) => r.json())
       .then((d) => setLaunch(d as LaunchInfo))
@@ -325,36 +388,69 @@ export function VisitWizard({
     // Already reviewed + delivered: show the completion screen and never re-enter
     // the inspection/review/submit flow — re-submitting a completed session
     // errors "This session was already reviewed and submitted".
+    const anyLive = view.percent > 0 || (!!view.stage && view.stage !== "connecting");
     if (view.status === "completed") {
-      if (stage !== "done" && stage !== "generating") setStage("done");
+      // The Health Check is completed and stays completed. The ONLY thing that runs
+      // after this is the OPTIONAL technician Rescan, which never reopens the check.
+      if (view.rescanStatus === "running") {
+        // Rescan armed/in-progress → drive its sub-stages; do not force "done".
+        if (anyLive && stage === "rescanlaunch") setStage("rescanning");
+        return;
+      }
+      // Rescan finished → regenerate the delivered report so it includes the
+      // Rescan Result / before-after, then return to the completion screen.
+      if (stage === "rescanning") {
+        // Best-effort: rebuild the delivered PDF so it includes the rescan before/after.
+        void fetch(`/api/diagnostics/${id}/regenerate-report`, { method: "POST" }).catch(() => {});
+        setStage("done");
+        return;
+      }
+      // Normal completed state (also the initial landing). Don't clobber the
+      // rescan launcher the technician just opened.
+      if (stage !== "done" && stage !== "generating" && stage !== "rescanlaunch") setStage("done");
       return;
     }
-    // Show the live scan the MOMENT it starts — any progress, or a real stage past
-    // "connecting" — so the technician watches the % climb instead of jumping
-    // straight from launch to inspection ("nothing, then suddenly done").
-    const scanLive =
-      view.status === "running" && (view.percent > 0 || (!!view.stage && view.stage !== "connecting"));
+    // Normal (original) single-scan lifecycle: launch → scanning → inspection.
+    const scanLive = view.status === "running" && anyLive;
     if (scanUnlocked && scanLive && (stage === "launch" || stage === "connecting")) {
       setStage("scanning");
     }
-    // Scan finished: if we never showed the scanning ring (fast scan / missed the
-    // window), show it first; otherwise advance to the technician's inspection.
     if (view.status === "scanned") {
       if (stage === "launch" || stage === "connecting") setStage("scanning");
       else if (stage === "scanning") setStage("inspection");
     }
-  }, [view.status, view.percent, view.stage, scanUnlocked, stage]);
+  }, [view.status, view.percent, view.stage, view.rescanStatus, scanUnlocked, stage, id]);
 
   const checks = view.diagnostic?.Checks ?? [];
   const summary = view.diagnostic?.Summary;
 
   async function saveInspection() {
+    // Every flagged item ("issue", incl. physical-damage "Yes") must carry a
+    // remark. Block Continue and highlight the offenders if any are empty.
+    const missing = new Set(
+      Object.entries(inspection)
+        .filter(([k, v]) => v === "issue" && !(remarks[k] ?? "").trim())
+        .map(([k]) => k),
+    );
+    if (missing.size > 0) {
+      setRemarkErrors(missing);
+      return;
+    }
+    setRemarkErrors(new Set());
     setBusy(true);
     try {
+      // Only send remarks for items that are actually flagged, so stale remarks
+      // from a toggled-back item don't leak through.
+      const cleanRemarks: Record<string, string> = {};
+      for (const [k, v] of Object.entries(inspection)) {
+        if (v === "issue" && (remarks[k] ?? "").trim()) {
+          cleanRemarks[k] = remarks[k].trim();
+        }
+      }
       await fetch(`/api/diagnostics/${id}/inspection`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ inspection, observations }),
+        body: JSON.stringify({ inspection, observations, remarks: cleanRemarks }),
       });
       setStage("findings");
     } finally {
@@ -376,26 +472,141 @@ export function VisitWizard({
     }
   }
 
+  // Optional, technician-only Rescan AFTER completion. Does not reopen or change the
+  // completed Health Check — the technician records any fixes/actions performed, then
+  // arms a rescan server-side and re-runs the same command; the rescan result is
+  // stored separately. Fixes + rescan appear in the report's before/after section.
+  const [rescanError, setRescanError] = useState<string | null>(null);
+  const [fixes, setFixes] = useState<Array<{ action: string; note: string }>>(
+    () =>
+      view.fixes && view.fixes.length
+        ? view.fixes.map((f) => ({ action: f.action ?? "", note: f.note ?? "" }))
+        : [{ action: "", note: "" }],
+  );
+  async function startRescan() {
+    setBusy(true);
+    setRescanError(null);
+    try {
+      // Persist the technician's fixes/actions first (best-effort — a rescan can
+      // still proceed if none were recorded).
+      const clean = fixes
+        .map((f) => ({ action: f.action.trim(), note: f.note.trim() }))
+        .filter((f) => f.action || f.note);
+      if (clean.length) {
+        await fetch(`/api/diagnostics/${id}/fixes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fixes: clean }),
+        }).catch(() => {});
+      }
+      const r = await fetch(`/api/diagnostics/${id}/start-rescan`, { method: "POST" });
+      if (!r.ok) {
+        const d = (await r.json().catch(() => ({}))) as { error?: string };
+        setRescanError(d.error ?? "Could not start the rescan.");
+        return;
+      }
+      setStage("rescanlaunch");
+    } catch {
+      setRescanError("Something went wrong. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Auto-arm the rescan when opened from the Orders list (/check/<id>?rescan=1).
+  // Fires once, only on an already-completed session that isn't mid-rescan. No new
+  // customer consent is requested — the session is already APPROVED (backend also
+  // enforces this in start-rescan).
+  useEffect(() => {
+    if (autoRescanRef.current) return;
+    if (searchParams.get("rescan") !== "1") return;
+    if (view.status !== "completed" || view.rescanStatus === "running") return;
+    autoRescanRef.current = true;
+    // Intentional URL-triggered action; startRescan is a stable declaration.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void startRescan();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, view.status, view.rescanStatus]);
+
+  // Persist the current fixes/actions to the session envelope. Called from the
+  // rescan launcher (on blur) so notes entered there reach the regenerated
+  // report's before/after — the backend preserves fixes across the rescan write.
+  async function saveFixes(list: { action: string; note: string }[] = fixes) {
+    const clean = list
+      .map((f) => ({ action: f.action.trim(), note: f.note.trim() }))
+      .filter((f) => f.action || f.note);
+    await fetch(`/api/diagnostics/${id}/fixes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fixes: clean }),
+    }).catch(() => {});
+  }
+
   async function draftWithAi() {
     setAiLoading(true);
+    setAiError(null);
     try {
       const res = await fetch(`/api/diagnostics/${id}/ai-draft`, { method: "POST" });
-      if (res.ok) {
-        const draft = (await res.json()) as AiDraft;
-        setAi(draft);
-        if (draft.finding) {
-          const match = FINDING_OPTIONS.find(
-            (f) => f.toLowerCase() === draft.finding!.trim().toLowerCase(),
-          );
-          if (match) setPrimaryFinding(match);
-        }
-        if (draft.diagnosis) setDiagnosis(draft.diagnosis.trim());
-        if (draft.recommendation) setRecommendation(draft.recommendation.trim());
+      if (!res.ok) {
+        setAiError("AI couldn't draft suggestions — fill the fields manually.");
+        return;
       }
+      const draft = (await res.json()) as AiDraft;
+      setAi(draft);
+      let filledAny = false;
+      if (draft.finding) {
+        const match = FINDING_OPTIONS.find(
+          (f) => f.toLowerCase() === draft.finding!.trim().toLowerCase(),
+        );
+        if (match) {
+          setPrimaryFinding(match);
+          filledAny = true;
+        }
+      }
+      if (draft.severity) {
+        const match = SEVERITIES.find(
+          (s) => s.toLowerCase() === draft.severity!.trim().toLowerCase(),
+        );
+        if (match) {
+          setSeverity(match);
+          filledAny = true;
+        }
+      }
+      if (draft.diagnosis) {
+        setDiagnosis(draft.diagnosis.trim());
+        filledAny = true;
+      }
+      if (draft.recommendation) {
+        setRecommendation(draft.recommendation.trim());
+        filledAny = true;
+      }
+      // Nothing usable came back (AI not configured, timeout, or off-format reply).
+      if (!filledAny) {
+        setAiError(
+          draft.aiConfigured === false
+            ? "AI drafting isn't configured — fill the fields manually."
+            : "AI couldn't draft suggestions — fill the fields manually.",
+        );
+      }
+    } catch {
+      setAiError("AI couldn't draft suggestions — fill the fields manually.");
     } finally {
       setAiLoading(false);
     }
   }
+
+  // Auto-draft once the moment the technician lands on Findings, so the four
+  // fields arrive pre-filled. The ref guard makes this fire exactly once per
+  // visit — re-entering Findings from Review won't re-run it, and the manual
+  // "Draft with AI" button remains for an explicit re-draft.
+  useEffect(() => {
+    if (stage === "findings" && !autoDraftedRef.current) {
+      autoDraftedRef.current = true;
+      void draftWithAi();
+    }
+    // draftWithAi is stable for this purpose; keying on `stage` alone is intended.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage]);
 
   async function submitAndDeliver() {
     setBusy(true);
@@ -637,35 +848,54 @@ export function VisitWizard({
             {INSPECTION_SECTIONS.map((sec) => (
               <div key={sec.section} className="rounded-2xl border border-border bg-surface p-4">
                 <div className="font-display font-semibold text-foreground">{sec.section}</div>
-                <div className="mt-2 flex flex-col gap-2">
+                <div className="mt-2 flex flex-col gap-3">
                   {sec.items.map((item) => {
                     const key = inspectionKey(sec.section, item);
-                    const val = inspection[key];
-                    return (
-                      <div key={key} className="flex items-center justify-between gap-3">
-                        <span className="text-sm text-foreground">{item}</span>
-                        <div className="flex gap-1">
-                          {(
-                            [
-                              ["ok", "OK", "ok"],
-                              ["issue", "Issue", "bad"],
-                              ["na", "N/T", "unknown"],
-                            ] as [InspectionStatus, string, "ok" | "bad" | "unknown"][]
-                          ).map(([v, label, tone]) => (
-                            <button
-                              key={v}
-                              onClick={() => setInspection((s) => ({ ...s, [key]: v }))}
-                              className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${
-                                val === v ? toneClasses[tone] : "border border-border text-muted"
-                              }`}
-                            >
-                              {label}
-                            </button>
-                          ))}
+                      const val = inspection[key];
+                      return (
+                        <div key={key} className="flex flex-col gap-1">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-sm text-foreground">{item}</span>
+                            <div className="flex gap-1">
+                              {(
+                                [
+                                  // Yes = the finding IS present (stored "issue" → shows a remark);
+                                  // No = fine (stored "ok"). Questions are phrased so Yes = problem.
+                                  ["issue", "Yes", "bad"],
+                                  ["ok", "No", "ok"],
+                                ] as [InspectionStatus, string, "ok" | "bad"][]
+                              ).map(([v, label, tone]) => (
+                                <button
+                                  key={v}
+                                  onClick={() => setInspection((s) => ({ ...s, [key]: v }))}
+                                  className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${
+                                    val === v ? toneClasses[tone] : "border border-border text-muted"
+                                  }`}
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          {val === "issue" ? (
+                            <RemarkField
+                              value={remarks[key] ?? ""}
+                              error={remarkErrors.has(key)}
+                              onChange={(v) => {
+                                setRemarks((s) => ({ ...s, [key]: v }));
+                                if (v.trim())
+                                  setRemarkErrors((s) => {
+                                    if (!s.has(key)) return s;
+                                    const n = new Set(s);
+                                    n.delete(key);
+                                    return n;
+                                  });
+                              }}
+                            />
+                          ) : null}
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
                 </div>
               </div>
             ))}
@@ -677,6 +907,11 @@ export function VisitWizard({
               className="w-full resize-none rounded-xl border border-border bg-surface p-3 text-sm text-foreground"
             />
           </div>
+          {remarkErrors.size > 0 ? (
+            <p className="mt-3 text-sm text-bad">
+              Add a remark for each item marked as an issue before continuing.
+            </p>
+          ) : null}
           <button
             onClick={saveInspection}
             disabled={busy}
@@ -684,6 +919,126 @@ export function VisitWizard({
           >
             Continue to findings →
           </button>
+        </div>
+      ) : null}
+
+      {/* R1 · Rescan launcher — re-run the SAME command after completion */}
+      {stage === "rescanlaunch" ? (
+        <div>
+          <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-brand">Rescan</div>
+          <h2 className="mt-1.5 font-display text-2xl font-bold tracking-tight text-foreground">
+            Run a rescan on this machine
+          </h2>
+          <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted">
+            Re-run the same diagnostic on the customer&rsquo;s PC. The result is stored as a
+            separate <b>Rescan</b> — the original Health Check result is not changed.
+          </p>
+          {!launch ? (
+            <div className="mt-5 flex items-center gap-3 rounded-2xl border border-border bg-surface p-6 text-sm text-muted">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-brand" />
+              Preparing command…
+            </div>
+          ) : (
+            <div className="card mt-5 p-6">
+              <div className="mb-4 inline-flex rounded-xl border border-border bg-surface-2/60 p-1 shadow-inner">
+                {(["windows", "mac"] as const).map((o) => (
+                  <button
+                    key={o}
+                    onClick={() => setOs(o)}
+                    className={`rounded-lg px-5 py-1.5 text-sm font-semibold transition-all duration-200 ${
+                      os === o ? "bg-brand text-white" : "text-muted hover:text-foreground"
+                    }`}
+                  >
+                    {o === "windows" ? "Windows" : "macOS"}
+                  </button>
+                ))}
+              </div>
+              {os === "windows" ? (
+                <div className="space-y-5">
+                  <div>
+                    <CommandLabel>Standard</CommandLabel>
+                    <Terminal lang="Windows PowerShell" command={launch.windows.standard} />
+                  </div>
+                  <div>
+                    <CommandLabel>With admin rights · UAC prompt</CommandLabel>
+                    <Terminal lang="Windows PowerShell (elevated)" command={launch.windows.elevated} />
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <CommandLabel>macOS Terminal</CommandLabel>
+                  <Terminal lang="zsh · Terminal" command={launch.mac.command} />
+                </div>
+              )}
+            </div>
+          )}
+          <div className="mt-6 inline-flex items-center gap-2.5 rounded-full border border-border bg-surface-2/60 px-3.5 py-1.5">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand opacity-60" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-brand" />
+            </span>
+            <span className="text-sm font-medium text-muted">Waiting for the rescan to start…</span>
+          </div>
+
+          {rescanError ? <p className="mt-3 text-sm text-bad">{rescanError}</p> : null}
+
+          {/* Fixes / actions taken — saved to the session; shown in the report's before/after. */}
+          <div className="mt-6 max-w-xl rounded-2xl border border-border bg-surface p-4">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-bold uppercase tracking-wide text-muted">Fixes / actions taken (optional)</div>
+              <button
+                onClick={() => setFixes((s) => [...s, { action: "", note: "" }])}
+                className="rounded-lg border border-brand px-2.5 py-1 text-xs font-semibold text-brand hover:bg-brand/10"
+              >
+                + Add
+              </button>
+            </div>
+            <div className="mt-2 flex flex-col gap-2">
+              {fixes.map((f, i) => (
+                <div key={i} className="flex gap-2">
+                  <input
+                    value={f.action}
+                    onChange={(e) => setFixes((s) => s.map((x, j) => (j === i ? { ...x, action: e.target.value } : x)))}
+                    onBlur={() => void saveFixes()}
+                    placeholder="Action (e.g. Driver update)"
+                    className="w-1/3 rounded-lg border border-border bg-surface p-2 text-sm text-foreground"
+                  />
+                  <input
+                    value={f.note}
+                    onChange={(e) => setFixes((s) => s.map((x, j) => (j === i ? { ...x, note: e.target.value } : x)))}
+                    onBlur={() => void saveFixes()}
+                    placeholder="What was done / observed"
+                    className="flex-1 rounded-lg border border-border bg-surface p-2 text-sm text-foreground"
+                  />
+                  {fixes.length > 1 ? (
+                    <button
+                      onClick={() =>
+                        setFixes((s) => {
+                          const next = s.filter((_, j) => j !== i);
+                          void saveFixes(next);
+                          return next;
+                        })
+                      }
+                      className="rounded-lg border border-border px-2 text-sm text-muted hover:border-bad hover:text-bad"
+                    >
+                      ×
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+            <p className="mt-1 text-[11px] text-muted">
+              Record what you fixed before rescanning; it appears in the report&rsquo;s before/after.
+            </p>
+          </div>
+        </div>
+      ) : null}
+
+      {/* R2 · Rescan progress */}
+      {stage === "rescanning" ? (
+        <div className="flex flex-col items-center">
+          <ProgressRing percent={view.percent} label={view.stage} />
+          <p className="mt-4 max-w-md text-center text-sm text-muted">Rescan · {view.message}</p>
         </div>
       ) : null}
 
@@ -697,9 +1052,14 @@ export function VisitWizard({
               disabled={aiLoading}
               className="rounded-lg border border-brand px-3 py-1.5 text-xs font-semibold text-brand hover:bg-brand/10 disabled:opacity-60"
             >
-              {aiLoading ? "Drafting…" : "Draft with AI"}
+              {aiLoading ? "Drafting…" : ai ? "Re-draft with AI" : "Draft with AI"}
             </button>
           </div>
+          {aiLoading ? (
+            <p className="mt-2 text-xs text-muted">Drafting suggestions with AI…</p>
+          ) : aiError ? (
+            <p className="mt-2 text-xs text-bad">{aiError}</p>
+          ) : null}
 
           <div className="mt-4 rounded-2xl border border-border bg-surface p-4">
             <label className="block text-xs font-semibold text-muted">Primary finding</label>
@@ -744,15 +1104,22 @@ export function VisitWizard({
 
             <label className="mt-4 block text-xs font-semibold text-muted">Recommendation</label>
             <div className="mt-1 flex flex-wrap gap-1.5">
-              {QUICK_RECOMMENDATIONS.map((r) => (
-                <button
-                  key={r}
-                  onClick={() => setRecommendation(r)}
-                  className="rounded-full border border-border px-2.5 py-0.5 text-xs text-muted hover:border-brand hover:text-brand"
-                >
-                  {r}
-                </button>
-              ))}
+              {QUICK_RECOMMENDATIONS.map((r) => {
+                const active = recommendation === r;
+                return (
+                  <button
+                    key={r}
+                    onClick={() => setRecommendation(active ? "" : r)}
+                    className={`rounded-full px-2.5 py-0.5 text-xs ${
+                      active
+                        ? "border border-brand bg-brand text-white"
+                        : "border border-border text-muted hover:border-brand hover:text-brand"
+                    }`}
+                  >
+                    {r}
+                  </button>
+                );
+              })}
             </div>
             <textarea
               value={recommendation}
@@ -833,9 +1200,14 @@ export function VisitWizard({
             {issues.length === 0 ? (
               <p className="mt-1 text-sm text-ok">No physical issues flagged.</p>
             ) : (
-              <ul className="mt-1 text-sm text-bad">
+              <ul className="mt-1 space-y-1 text-sm text-bad">
                 {issues.map(([k]) => (
-                  <li key={k}>• {k.replace("|", " — ")}</li>
+                  <li key={k}>
+                    • {k.replace("|", " — ")}
+                    {remarks[k]?.trim() ? (
+                      <span className="text-muted"> — {remarks[k].trim()}</span>
+                    ) : null}
+                  </li>
                 ))}
               </ul>
             )}
@@ -933,6 +1305,7 @@ export function VisitWizard({
               Back to orders
             </Link>
           </div>
+
         </div>
       ) : null}
     </div>
