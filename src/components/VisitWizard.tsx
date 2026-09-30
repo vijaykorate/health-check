@@ -327,6 +327,9 @@ export function VisitWizard({
   // caught intermediate progress — while ignoring a freshly re-armed rescan that
   // momentarily shows a stale 'scanned'.
   const sawRescanRunningRef = useRef(false);
+  // Fire the one-time auto-download of the finished rescan report exactly once per
+  // rescan, so a refresh / re-render on the done screen doesn't re-download it.
+  const rescanDownloadedRef = useRef(false);
   const debug = searchParams.get("debug") === "1";
   // Surface a hint when the launcher has been waiting a while with no scan data —
   // usually the command was not run on the PC or was blocked (SmartScreen, etc.).
@@ -435,8 +438,27 @@ export function VisitWizard({
         (stage === "rescanlaunch" && view.rescanStatus === "scanned" && sawRescanRunningRef.current)
       ) {
         // Best-effort: pre-build the separate rescan PDF so "View rescan report" is
-        // instant. The original completed report stays exactly as delivered.
-        void fetch(`/api/diagnostics/${id}/regenerate-report`, { method: "POST" }).catch(() => {});
+        // instant. The original completed report stays exactly as delivered. Once it's
+        // built, auto-download the rescan report a single time (the backend serves it
+        // with Content-Disposition: attachment, so this downloads without navigating).
+        // Awaiting the pre-build first avoids the GET racing the POST to generate the
+        // same file; `rescanDownloadedRef` keeps it to one download per rescan.
+        void fetch(`/api/diagnostics/${id}/regenerate-report`, { method: "POST" })
+          .catch(() => {})
+          .finally(() => {
+            if (rescanDownloadedRef.current) return;
+            rescanDownloadedRef.current = true;
+            try {
+              const a = document.createElement("a");
+              a.href = `/api/diagnostics/${id}/rescan-report`;
+              a.rel = "noopener";
+              document.body.appendChild(a);
+              a.click();
+              a.remove();
+            } catch {
+              /* best-effort auto-download; the "View rescan report" button remains */
+            }
+          });
         setStage("done");
         return;
       }
@@ -524,6 +546,8 @@ export function VisitWizard({
     // New rescan: forget any prior "saw running" so a stale 'scanned' from a previous
     // rescan doesn't immediately bounce this fresh one to the done screen.
     sawRescanRunningRef.current = false;
+    // Arm the one-time auto-download for this fresh rescan.
+    rescanDownloadedRef.current = false;
     try {
       // Persist the technician's fixes/actions first (best-effort — a rescan can
       // still proceed if none were recorded).
