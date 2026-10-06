@@ -205,6 +205,9 @@ export interface SessionView {
   observations: string | null;
   delivered: boolean;
   orderId: string | null;
+  /** Human-facing order number ("ORD/YYYYMMDD/NNNNN"), for display + the report
+   *  download filename. Distinct from `orderId` (the internal ORDER_ID key). */
+  serviceOrderNo?: string | null;
   customerName: string | null;
   /** Backend `DIAGNOSTIC_ID` (IDCHIP-YYYY-NNNNNN), for display/report links. */
   diagnosticId?: string | null;

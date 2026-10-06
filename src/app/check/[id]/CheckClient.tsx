@@ -203,7 +203,8 @@ export function CheckClient({ id }: { id: string }) {
               On-site visit · running on the customer&rsquo;s machine
             </div>
             <div className="mt-1 font-display text-base font-semibold text-foreground">
-              Order {view!.orderId} <span className="text-muted">·</span> {view!.customerName}
+              {view!.serviceOrderNo ?? `Order ${view!.orderId}`}{" "}
+              <span className="text-muted">·</span> {view!.customerName}
             </div>
           </div>
         </div>

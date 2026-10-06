@@ -6,6 +6,7 @@
 import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/session-auth";
 import { loadBackendDetail } from "@/lib/hc-detail";
+import { extractOrderNo } from "@/lib/orders";
 import type { DiagnosticReport, Finding, SessionView } from "@/lib/types";
 
 export async function GET(
@@ -38,6 +39,11 @@ export async function GET(
       ? (d.diagnostic as DiagnosticReport)
       : null;
 
+  // Human-facing order number ("ORD/YYYYMMDD/NNNNN") for display + the report
+  // download filename, reused straight from the backend detail payload (no new
+  // field/call). Distinct from `orderId` below, which stays the internal key.
+  const serviceOrderNo = extractOrderNo(d as unknown as Record<string, unknown>);
+
   const view: SessionView = {
     id: d.id,
     status: d.status,
@@ -69,6 +75,7 @@ export async function GET(
     // This standalone UI is always an on-site technician visit; a truthy
     // orderId keeps the visit chrome. We surface the backend ticket number.
     orderId: d.ticket_number ?? id,
+    serviceOrderNo,
     customerName: d.customer_name ?? null,
     diagnosticId: d.diagnostic_id ?? null,
     customerConnectionStatus: d.customerConnectionStatus ?? "NOT_CONNECTED",

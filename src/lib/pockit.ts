@@ -100,6 +100,9 @@ export interface PockitTechnician {
 
 export interface PockitJob {
   orderId: string;
+  /** Human-facing order number ("ORD/YYYYMMDD/NNNNN"), distinct from the internal
+   *  ORDER_ID key. Used for display + the report download filename. */
+  serviceOrderNo: string;
   jobCardNo: string;
   customerId: string;
   customerName: string;
@@ -177,6 +180,7 @@ export async function fetchTechnicianJobs(
     return hcRows
       .map((r) => ({
         orderId: String(r.ORDER_ID ?? r.ORDER_NO ?? r.ORDER_NUMBER ?? ""),
+        serviceOrderNo: String(r.ORDER_NO ?? r.ORDER_NUMBER ?? r.SERVICE_ORDER_NO ?? ""),
         jobCardNo: String(r.JOB_CARD_NO ?? r.JOB_CARD_NUMBER ?? ""),
         customerId: String(r.CUSTOMER_ID ?? ""),
         customerName: String(r.CUSTOMER_NAME ?? ""),

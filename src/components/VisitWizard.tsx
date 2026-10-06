@@ -1397,7 +1397,7 @@ export function VisitWizard({
           <div className="mt-4 flex flex-wrap gap-3">
             {deliverResult?.pdfUrl ? (
               <a
-                href={deliverResult.pdfUrl}
+                href={`/api/diagnostics/${id}/report?u=${encodeURIComponent(deliverResult.pdfUrl)}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-block rounded-xl bg-brand px-5 py-2.5 font-display font-semibold text-white hover:bg-brand-strong"
