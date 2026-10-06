@@ -10,6 +10,8 @@ import { BrandMark } from "@/components/Brand";
 
 interface OrderRow {
   orderId: string;
+  /** Human-facing order number ("ORD/YYYYMMDD/NNNNN"); falls back to orderId. */
+  serviceOrderNo?: string | null;
   customerName: string;
   deviceType: string;
   manufacturer: string;
@@ -37,7 +39,7 @@ function OrderCard({ o }: { o: OrderRow }) {
       className="rounded-2xl border border-border bg-surface p-4 transition-colors hover:border-brand"
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="font-display font-semibold text-foreground">{o.orderId}</span>
+        <span className="font-display font-semibold text-foreground">{o.serviceOrderNo || o.orderId}</span>
         <div className="flex items-center gap-2">
           {o.state === "in_progress" ? (
             <span className="rounded-full bg-brand/15 px-2 py-0.5 text-xs font-semibold text-brand">

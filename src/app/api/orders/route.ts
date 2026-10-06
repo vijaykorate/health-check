@@ -56,6 +56,7 @@ export async function GET() {
       }
       return {
         orderId: j.orderId,
+        serviceOrderNo: j.serviceOrderNo,
         customerName: j.customerName,
         deviceType: j.deviceType,
         manufacturer: j.manufacturer,
